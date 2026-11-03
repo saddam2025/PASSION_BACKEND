@@ -1,0 +1,136 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90mC:/Users/HP/OneDrive/Documents/PASSION_PLATFORM/PASSION_BACKEND[39m
+
+BE-5C payment date diagnostic {"storedReceivedAt":"2026-10-31T12:00:00.000Z","computedRange":{"from":"2026-10-30T22:00:00.000Z","to":"2026-10-31T21:59:59.999Z"},"query":{"courseId":"6ae7cac26493376df402173a","kind":"payment","status":"confirmed","method":"cash","dateFrom":"2026-10-31","dateTo":"2026-10-31"},"dateField":"receivedAt","courseFilterJoin":"enrollment.courseId"}
+ [31m❯[39m src/tests/payments.mongo.integration.test.ts [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 286056[2mms[22m[39m
+   [31m❯[39m BE-5C payments, derived summaries and export (Atlas passion_test) [2m(10)[22m
+     [33m[2m✓[22m[39m records partial then full payment, replays idempotently, confirms without a reason when paid, and supports refunds[33m 26731[2mms[22m[39m
+[31m     [31m×[31m voids once with a reason, refuses a void that makes net negative, and recomputes the enrollment summary[39m[33m 65901[2mms[22m[39m
+     [33m[2m✓[22m[39m serializes concurrent identical payment submissions to one immutable record[33m 15706[2mms[22m[39m
+     [33m[2m✓[22m[39m rolls back the record when the denormalized summary update fails[33m 12473[2mms[22m[39m
+     [33m[2m✓[22m[39m enforces permissions, CSRF and currency matching; a granted Assistant can record but cannot refund or void[33m 46816[2mms[22m[39m
+     [33m[2m✓[22m[39m cancellation leaves payment records intact, derives cancelled, and still allows a refund[33m 29562[2mms[22m[39m
+     [33m[2m✓[22m[39m filters and sorts enrollment/payment lists, hides summary for an actor without viewPayments, and scopes payment details[33m 24914[2mms[22m[39m
+     [33m[2m✓[22m[39m filters payment ledger on inclusive Cairo-day boundaries across UTC date changes and returns an empty day[33m 13623[2mms[22m[39m
+     [33m[2m✓[22m[39m streams safe Arabic CSV with BOM, matching filters, conditional payment columns, row cap, and a PII-free audit[33m 20593[2mms[22m[39m
+     [33m[2m✓[22m[39m does not fail a payment request when notification delivery fails[33m 18261[2mms[22m[39m
+ [32m✓[39m src/tests/registrations.mongo.integration.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 199540[2mms[22m[39m
+   [32m✓[39m BE-5A public registrations [2m(16)[22m
+     [33m[2m✓[22m[39m happy path creates a lead, enrollment snapshot, safe audit event and per-user notifications[33m 12349[2mms[22m[39m
+     [33m[2m✓[22m[39m requires a published, non-deleted course with registration open[33m 10005[2mms[22m[39m
+     [33m[2m✓[22m[39m rejects a full course based on active enrollment count[33m 10856[2mms[22m[39m
+     [33m[2m✓[22m[39m rejects required-answer omissions and invalid values in canonical and mock answer shapes without writes[33m 20478[2mms[22m[39m
+     [33m[2m✓[22m[39m validates email, phone, checkbox, radio values and text length for published field types[33m 12787[2mms[22m[39m
+     [33m[2m✓[22m[39m returns neutral success for honeypot, too-fast and implausible future submissions without writes[33m 6336[2mms[22m[39m
+     [33m[2m✓[22m[39m accepts the current mock answer map and form-start/honeypot aliases while stripping unknown top-level keys[33m 12732[2mms[22m[39m
+     [33m[2m✓[22m[39m returns the same reference for idempotent replay and rejects a conflicting payload with the same key[33m 10845[2mms[22m[39m
+     [33m[2m✓[22m[39m returns the existing neutral confirmation for duplicate active registrations and creates no second enrollment[33m 12150[2mms[22m[39m
+     [33m[2m✓[22m[39m serializes concurrent duplicate submissions into one active enrollment[33m 13659[2mms[22m[39m
+     [33m[2m✓[22m[39m allows a second course on the same lead, preserves first-touch attribution and only links same-phone leads as possible duplicates[33m 22112[2mms[22m[39m
+     [33m[2m✓[22m[39m snapshots promo pricing and published course content at registration time[33m 6560[2mms[22m[39m
+     [33m[2m✓[22m[39m confirmation returns only reference, Arabic course title and status; unknown references have the same 404[33m 8704[2mms[22m[39m
+     [33m[2m✓[22m[39m enforces a burst limit per IP and a separate limit keyed by normalized email hash[33m 3977[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps a registration successful when notification fan-out fails and logs no request PII[33m 10768[2mms[22m[39m
+     [33m[2m✓[22m[39m requires an allowlisted Origin but does not require CSRF for public JSON registration[33m 9933[2mms[22m[39m
+ [32m✓[39m src/tests/auth.mongo.integration.test.ts [2m([22m[2m15 tests[22m[2m)[22m[33m 194711[2mms[22m[39m
+   [32m✓[39m BE-3 auth, RBAC and account workflows (Atlas passion_test) [2m(15)[22m
+     [33m[2m✓[22m[39m login success and wrong/unknown credentials share a generic response; unknown users execute the dummy Argon2 path[33m 5357[2mms[22m[39m
+     [33m[2m✓[22m[39m locks after five consecutive failures and clears the lock after expiry[33m 10927[2mms[22m[39m
+     [33m[2m✓[22m[39m changes password only with the current password, then invalidates the prior access and refresh session[33m 13108[2mms[22m[39m
+     [33m[2m✓[22m[39m rate limits repeated login attempts by a hashed email key[33m 12169[2mms[22m[39m
+     [33m[2m✓[22m[39m rate limits login attempts by client IP across different email addresses[33m 30328[2mms[22m[39m
+     [33m[2m✓[22m[39m rotates refresh tokens and revokes the whole family when a rotated token is reused[33m 11485[2mms[22m[39m
+     [33m[2m✓[22m[39m CSRF rejects missing/incorrect headers and disallowed Origins[33m 2133[2mms[22m[39m
+     [33m[2m✓[22m[39m logout revokes the refresh family and invalidates refresh requests[33m 11161[2mms[22m[39m
+     [33m[2m✓[22m[39m deactivation bumps tokenVersion and rejects an otherwise valid access cookie[33m 11627[2mms[22m[39m
+     [33m[2m✓[22m[39m invites create, validate, accept once; expired/revoked links fail and resend rotates the token[33m 21861[2mms[22m[39m
+     [33m[2m✓[22m[39m password reset is neutral for unknown emails and is single use for a known user[33m 14846[2mms[22m[39m
+     [33m[2m✓[22m[39m prevents last-admin demotion/deactivation and self-demotion; assistant cannot call admin routes[33m 10548[2mms[22m[39m
+     [33m[2m✓[22m[39m returns server-computed default plus granted permissions and never returns password/token hashes[33m 12141[2mms[22m[39m
+     [33m[2m✓[22m[39m writes audit events without credentials, tokens, or unnecessary email data[33m 9311[2mms[22m[39m
+     [33m[2m✓[22m[39m seed admin is idempotent and never overwrites an existing account[33m 6196[2mms[22m[39m
+ [32m✓[39m src/tests/staffRecords.mongo.integration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 73220[2mms[22m[39m
+   [32m✓[39m BE-5B staff records (MongoDB integration) [2m(7)[22m
+     [33m[2m✓[22m[39m filters, searches, sorts and paginates enrollments with max page size and Cairo day boundaries[33m 10481[2mms[22m[39m
+     [33m[2m✓[22m[39m returns detail without secrets or unrelated lead data and normalizes invalid/missing ids to the same 404[33m 13972[2mms[22m[39m
+     [33m[2m✓[22m[39m enforces auth, CSRF and Assistant permissions while allowing default follow-up and notes actions[33m 7396[2mms[22m[39m
+     [33m[2m✓[22m[39m assigns only active staff, validates follow-up transitions, logs WhatsApp without claiming a sent message, and audits mutations[33m 7791[2mms[22m[39m
+     [33m[2m✓[22m[39m requires confirmation reason, cancellation reason and deactivates cancelled enrollment for a new registration[33m 9277[2mms[22m[39m
+     [33m[2m✓[22m[39m scopes notifications to the current user and supports unread count, read and read-all with CSRF[33m 6983[2mms[22m[39m
+     [33m[2m✓[22m[39m returns lead-level enrollment counts separately and only references for related registrations[33m 3434[2mms[22m[39m
+ [32m✓[39m src/tests/media.mongo.integration.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 27301[2mms[22m[39m
+   [32m✓[39m BE-6 media upload, privacy and usage (Atlas + in-memory storage) [2m(10)[22m
+     [33m[2m✓[22m[39m returns 401 without auth, rejects multipart writes without CSRF, and accepts an authenticated multipart upload and list[33m 4779[2mms[22m[39m
+     [33m[2m✓[22m[39m valid png upload creates four re-encoded variants, strips metadata, stores random relative keys and never uses the filename[33m 351[2mms[22m[39m
+     [33m[2m✓[22m[39m searches, paginates and filters the media library by usage[33m 3147[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses used deletion with references, removes every variant for unused assets, and hides forbidden Assistant deletion[33m 1950[2mms[22m[39m
+     [33m[2m✓[22m[39m requires recordPayments to upload private receipts, limits signed URLs to payment viewers, and audits receipt access by ids[33m 785[2mms[22m[39m
+     [33m[2m✓[22m[39m attaches a private receipt once, rejects duplicate attachment and rejects a different Assistant[33m 3573[2mms[22m[39m
+     [33m[2m✓[22m[39m payment creation verifies and attaches an existing private receipt in the payment transaction[33m 5425[2mms[22m[39m
+     [33m[2m✓[22m[39m purges only unattached private receipts older than 24 hours[33m 773[2mms[22m[39m
+ [32m✓[39m src/tests/courses.mongo.integration.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 34881[2mms[22m[39m
+   [32m✓[39m BE-4 courses API and service [2m(8)[22m
+     [33m[2m✓[22m[39m creates, reads and lists courses with Admin service operations[33m 2810[2mms[22m[39m
+     [33m[2m✓[22m[39m restricts dashboard course routes to Admin and accepts the new-course dialog payload[33m 2119[2mms[22m[39m
+     [33m[2m✓[22m[39m saves with expectedVersion, records slug history and rejects stale writes[33m 4456[2mms[22m[39m
+     [33m[2m✓[22m[39m tracks and releases public media usage transactionally across draft, publish and soft delete[33m 4288[2mms[22m[39m
+     [33m[2m✓[22m[39m validates readiness before publishing, then publishes and returns only public content[33m 2471[2mms[22m[39m
+     [33m[2m✓[22m[39m uses the same public 404 for absent and unpublished courses, and resolves old slug to current slug[33m 4691[2mms[22m[39m
+     [33m[2m✓[22m[39m unpublishes, archives, restores and soft-deletes without deleting the record[33m 7463[2mms[22m[39m
+     [33m[2m✓[22m[39m does not publish an incomplete snapshot and sanitizes stored copy[33m 2227[2mms[22m[39m
+ [32m✓[39m src/tests/models.mongo.integration.test.ts [2m([22m[2m7 tests[22m[2m)[22m[33m 21240[2mms[22m[39m
+   [32m✓[39m BE-2 MongoDB models and indexes [2m(7)[22m
+     [33m[2m✓[22m[39m cleans only its model collections in the configured _test database[33m 2565[2mms[22m[39m
+     [33m[2m✓[22m[39m builds unique, lookup, partial and TTL indexes before assertions[33m 3601[2mms[22m[39m
+     [33m[2m✓[22m[39m rejects duplicate unique email, token hash, slug, old slug, idempotency and slug-history ownership[33m 4563[2mms[22m[39m
+     [33m[2m✓[22m[39m allows another lead/course enrollment once the previous registration is cancelled[33m 675[2mms[22m[39m
+     [33m[2m✓[22m[39m persists modified Mixed course sections without revision history fields[33m 462[2mms[22m[39m
+     [33m[2m✓[22m[39m blocks payment edits/deletes and allows one reasoned void only[33m 750[2mms[22m[39m
+ [32m✓[39m src/tests/be7a.mongo.integration.test.ts [2m([22m[2m11 tests[22m[2m)[22m[33m 22518[2mms[22m[39m
+   [32m✓[39m BE-7A settings, categories, audit [2m(11)[22m
+     [33m[2m✓[22m[39m public settings never expose message templates or staff defaults[33m 445[2mms[22m[39m
+     [33m[2m✓[22m[39m patches settings by section and rejects stale versions[33m 1014[2mms[22m[39m
+     [33m[2m✓[22m[39m sanitizes legal HTML and increments policyVersion only when legal text changes[33m 3344[2mms[22m[39m
+     [33m[2m✓[22m[39m generates a deterministic Arabic category slug, soft-deletes and keeps hidden categories out of public list[33m 1484[2mms[22m[39m
+     [33m[2m✓[22m[39m refuses deleting a category in use by a course with a typed conflict[33m 1151[2mms[22m[39m
+     [33m[2m✓[22m[39m queries audit entries with Cairo day boundaries, capped pagination and safe actor projection[33m 1999[2mms[22m[39m
+     [33m[2m✓[22m[39m exports UTF-8 BOM and neutralizes formula injection without exposing ids[33m 664[2mms[22m[39m
+     [33m[2m✓[22m[39m serves public settings and categories and gates the audit endpoint through real HTTP requests[33m 998[2mms[22m[39m
+     [33m[2m✓[22m[39m applies an Admin settings section through the authenticated HTTP route with CSRF and optimistic version[33m 1232[2mms[22m[39m
+     [33m[2m✓[22m[39m snapshots current Assistant defaults on invite acceptance without altering existing users[33m 3496[2mms[22m[39m
+ [32m✓[39m src/tests/mongo.integration.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 9291[2mms[22m[39m
+   [32m✓[39m BE-1 MongoDB Atlas integration [2m(3)[22m
+     [33m[2m✓[22m[39m passes readiness while MongoDB is connected[33m 1555[2mms[22m[39m
+     [33m[2m✓[22m[39m commits transactions and rolls back failed callbacks[33m 1047[2mms[22m[39m
+ [32m✓[39m src/tests/foundation.http.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 123[2mms[22m[39m
+ [32m✓[39m src/tests/models.unit.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m src/tests/time.unit.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m src/tests/courses.unit.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 28[2mms[22m[39m
+ [32m✓[39m src/tests/paymentStatus.unit.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m src/tests/environment.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m src/tests/passwords.unit.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/tests/testFullSummary.unit.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m src/tests/mongoTestSafety.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/tests/payments.mongo.integration.test.ts[2m > [22mBE-5C payments, derived summaries and export (Atlas passion_test)[2m > [22mvoids once with a reason, refuses a void that makes net negative, and recomputes the enrollment summary
+[31m[1mError[22m: Test timed out in 60000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[36m [2m❯[22m src/tests/payments.mongo.integration.test.ts:[2m118:3[22m[39m
+    [90m116|[39m   }, 60_000);
+    [90m117|[39m
+    [90m118|[39m   it('voids once with a reason, refuses a void that makes net negative…
+    [90m   |[39m   [31m^[39m
+    [90m119|[39m     const { enrollment } = await createEnrollment(2);
+    [90m120|[39m     const admin = await login(client());
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m17 passed[39m[22m[90m (18)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m141 passed[39m[22m[90m (142)[39m
+[2m   Start at [22m 01:23:19
+[2m   Duration [22m 914.42s[2m (tests 97%, import 2%, setup 1%)[22m
+
+JSON report written to C:/Users/HP/OneDrive/Documents/PASSION_PLATFORM/PASSION_BACKEND/test-results.json

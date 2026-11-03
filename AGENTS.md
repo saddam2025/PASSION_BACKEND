@@ -1,0 +1,3 @@
+Backend V1: you MUST run installs, the dev server, tests and HTTP smoke requests, and fix every failure. Never claim something works unless you ran it. No fake implementations.
+
+During a slice run only test:focus on the files of the slice, test:fast, typecheck and lint. Do NOT run the full suite and do not wait for it: the owner runs npm run test:full and pastes the summary line. Run test:full yourself ONLY if the owner asks, or if the slice changed shared code (auth, permissions, middleware, models, test setup, config). A slice is marked Done in docs/PROGRESS.md only after the owner's full-suite summary shows failed 0 and skipped 0, or after you ran it yourself when it was required. Report format: keep it short, no long outputs, no repeated tables of previous slices.
