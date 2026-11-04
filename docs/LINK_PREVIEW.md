@@ -2,8 +2,8 @@
 
 The API serves crawler HTML from `GET /api/v1/seo/courses/:slug`. The page reads only the currently published snapshot and includes Arabic title/description, canonical URL, Open Graph/Twitter metadata, absolute image URL and an immediate human redirect to the real SPA URL. Historical slugs return metadata canonicalized to the current slug. `GET /api/v1/seo/sitemap.xml` and `/api/v1/seo/robots.txt` provide crawler discovery.
 
-## Deployment rewrite (pending hosting decision)
+## Vercel deployment rewrite
 
-At deployment, route requests under `/ar/courses/*` to the matching API SEO endpoint only when the User-Agent is one of `facebookexternalhit`, `Facebot`, `WhatsApp`, `Twitterbot`, or `LinkedInBot`. All human browsers continue to receive the frontend SPA. Preserve the requested slug so old-slug canonicalization can run in the API. For example, an nginx `map $http_user_agent $course_preview` can detect these agents, then a location/rewrite can proxy to `/api/v1/seo/courses/$slug`; a Cloudflare Worker can do the same before serving the SPA. Avoid matching user-agent text in the application itself as an access-control rule.
+`PASSION_FRONTEND/vercel.json` routes `/ar/courses/:slug` and `/courses/:slug` to `GET /api/v1/seo/courses/:slug` only when the User-Agent matches `facebookexternalhit`, `Facebot`, `WhatsApp`, `Twitterbot`, `LinkedInBot`, `TelegramBot`, or `Slackbot`. Human browsers continue to the SPA. The source URL slug is preserved so historical-slug canonicalization runs in the API. This is crawler routing, not access control.
 
-If the frontend and API share a host, configure the edge/server proxy rule before the SPA fallback, keep `/api/v1/*` on the API, and use `APP_BASE_URL` as the public origin. If they use separate hosts, the public-site edge must proxy crawler requests to the API origin while canonical links still use the public-site `APP_BASE_URL`. Final hostnames and rewrite syntax remain pending the hosting decision.
+The same Vercel rewrite list sends `/api/:path*` to the backend and maps `/sitemap.xml` and `/robots.txt` to `/api/v1/seo/sitemap.xml` and `/api/v1/seo/robots.txt`. These rules precede the SPA fallback. Set backend `APP_BASE_URL` to `https://passion-frontend.vercel.app`; the API emits canonical and sitemap URLs for that public origin.

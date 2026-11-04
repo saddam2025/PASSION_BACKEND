@@ -19,14 +19,14 @@ Add these in **Railway → API service → Variables**. Put secret values direct
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `PORT` | Leave unset; Railway injects this. |
-| `TRUST_PROXY_HOPS` | `1` for direct browser-to-Railway API requests. |
+| `TRUST_PROXY_HOPS` | `2` for browser → Vercel rewrite → Railway proxy → Express. Verify the forwarded chain as described below. |
 | `MONGODB_URI` | The Atlas URI for the existing production database `PASSION`, not `passion_test`. Copy it from your local ignored backend `.env`; do not post it. |
 | `ACCESS_TOKEN_SECRET` | Generate a unique random value at least 32 characters long. |
 | `REFRESH_TOKEN_SECRET` | Generate a different unique random value at least 32 characters long. |
-| `COOKIE_DOMAIN` | `localhost` (required by current schema; ignored for production `__Host-` cookies). |
+| `COOKIE_DOMAIN` | `passion-frontend.vercel.app` (the schema requires a non-empty value; production `__Host-` cookies intentionally ignore it and omit `Domain`). |
 | `COOKIE_SECURE` | `true` |
-| `COOKIE_SAME_SITE` | `none` when using the Vercel and Railway generated domains directly; `none` requires Secure cookies. A custom frontend and API domain under the same registrable domain can use `lax` and is more reliable with browser privacy settings. |
-| `CORS_ORIGINS` | `https://passion-frontend.vercel.app` (exact origin; no trailing slash). |
+| `COOKIE_SAME_SITE` | `lax` (the browser talks to the Vercel origin; Vercel proxies API requests to Railway). |
+| `CORS_ORIGINS` | `https://passion-frontend.vercel.app` only (exact origin; no trailing slash). |
 | `APP_BASE_URL` | `https://passion-frontend.vercel.app` |
 | `LOG_LEVEL` | `info` |
 | `R2_ACCOUNT_ID` | Cloudflare R2 account ID. |
@@ -45,12 +45,15 @@ Atlas only accepts database connections from IP addresses in its project's IP ac
 
 ## Connect Vercel to Railway
 
-After Railway deploys and provides its public API domain:
+The frontend's `vercel.json` sends `/api/*`, crawler course pages, `/sitemap.xml` and `/robots.txt` through Vercel to Railway. The browser therefore keeps the Vercel origin for API calls and cookies.
 
-1. In **Vercel → passion-frontend → Settings → Environment Variables**, set `VITE_API_BASE_URL` to `https://<your-railway-domain>/api/v1` for Production (and Preview if needed). Keep the frontend's `VITE_SITE_URL` as `https://passion-frontend.vercel.app`.
+1. In **Vercel → passion-frontend → Settings → Environment Variables**, set `VITE_API_BASE_URL` to `/api/v1` for Production. Set `VITE_SITE_URL` to `https://passion-frontend.vercel.app` and `VITE_MEDIA_BASE_URL` to the public R2 media domain.
 2. Redeploy the Vercel frontend so Vite bakes in the API URL. Do not add MongoDB, token, email, or R2 secrets to Vercel.
 3. Open `https://<your-railway-domain>/api/v1/health/ready`; expect a JSON response with `status: "ready"` and `database: "ok"`.
-4. Test Admin login from the Vercel site. If cookies are blocked because the Vercel and Railway generated domains are cross-site, attach a custom domain to each service under the same registrable domain, then set `COOKIE_SAME_SITE=lax`, update `CORS_ORIGINS`, `APP_BASE_URL`, and `VITE_API_BASE_URL`, and redeploy both services.
+4. Test Admin login from the Vercel site. Confirm `__Host-access`, `__Host-refresh`, and `__Host-csrf` are stored under the frontend host with `Secure`, `Path=/`, and no `Domain` attribute.
+5. Do not use the Railway domain as the frontend API base. Direct cross-site requests bypass the same-origin cookie setup.
+
+`TRUST_PROXY_HOPS=2` means Express trusts the Railway ingress and the preceding Vercel proxy in the stated request path. The backend's proxy-hop unit test demonstrates how 1, 2, and 3 hops select addresses from a sample `X-Forwarded-For` chain, and the login rate-limit test confirms the limit keys on `req.ip`. If the value is too low, users can share a proxy IP and hit each other's IP limit. If it is too high, client-supplied forwarded addresses can be trusted and spoofed. After deploy, verify the actual chain and ensure the Railway API cannot be reached through an alternate untrusted path. Account lockout remains keyed to the account; the separate login IP limiter keys to the resolved client IP.
 
 ## MongoDB IP allowlist reference
 

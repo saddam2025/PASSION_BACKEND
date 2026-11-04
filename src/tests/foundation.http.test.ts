@@ -5,6 +5,7 @@ import { createApp } from '../app/createApp';
 import { parseEnvironment } from '../config/env';
 import { createLogger } from '../config/logger';
 import { validateRequest } from '../middleware/validation';
+import { csrfProtection } from '../middleware/csrf';
 import { z } from 'zod';
 
 const environment = parseEnvironment({
@@ -132,6 +133,44 @@ describe('BE-1 HTTP foundation', () => {
     await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '203.0.113.10').expect(200);
     await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '198.51.100.11').expect(200);
     await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '203.0.113.10').expect(429);
+  });
+
+  it('resolves the client address from the configured number of trusted proxy hops', async () => {
+    const forwardedFor = '198.51.100.10, 192.0.2.20, 192.0.2.30';
+    for (const [hops, expectedIp] of [[1, '192.0.2.30'], [2, '192.0.2.20'], [3, '198.51.100.10']] as const) {
+      const proxyEnvironment = parseEnvironment({
+        NODE_ENV: 'test', PORT: '4000', TRUST_PROXY_HOPS: String(hops),
+        MONGODB_URI: 'mongodb://127.0.0.1:27017/passion?replicaSet=rs0',
+        ACCESS_TOKEN_SECRET: 'access-secret-for-http-tests-only-0000001',
+        REFRESH_TOKEN_SECRET: 'refresh-secret-for-http-tests-only-0002',
+        COOKIE_DOMAIN: 'localhost', COOKIE_SECURE: 'false', CORS_ORIGINS: 'https://passion-frontend.vercel.app',
+        APP_BASE_URL: 'https://passion-frontend.vercel.app', LOG_LEVEL: 'silent',
+      });
+      const ipApp = createApp(proxyEnvironment, {
+        logger: createLogger('silent'),
+        registerRoutes: (target: Express) => target.get('/api/v1/ip-probe', (req, res) => res.json({ ip: req.ip })),
+      });
+      await request(ipApp).get('/api/v1/ip-probe').set('X-Forwarded-For', forwardedFor).expect(200, { ip: expectedIp });
+    }
+  });
+
+  it('accepts only the exact configured frontend Origin or Referer for CSRF', async () => {
+    const exactOrigin = 'https://passion-frontend.vercel.app';
+    const csrfEnvironment = parseEnvironment({
+      NODE_ENV: 'test', PORT: '4000', MONGODB_URI: 'mongodb://127.0.0.1:27017/passion?replicaSet=rs0',
+      ACCESS_TOKEN_SECRET: 'access-secret-for-http-tests-only-0000001',
+      REFRESH_TOKEN_SECRET: 'refresh-secret-for-http-tests-only-0002',
+      COOKIE_DOMAIN: 'localhost', COOKIE_SECURE: 'false', CORS_ORIGINS: exactOrigin,
+      APP_BASE_URL: exactOrigin, LOG_LEVEL: 'silent',
+    });
+    const csrfApp = createApp(csrfEnvironment, {
+      logger: createLogger('silent'),
+      registerRoutes: (target: Express) => target.post('/api/v1/csrf-probe', ...csrfProtection(csrfEnvironment), (_req, res) => res.sendStatus(204)),
+    });
+    const token = 'matching-csrf-test-token';
+    await request(csrfApp).post('/api/v1/csrf-probe').set('Origin', exactOrigin).set('Cookie', `passion_csrf=${token}`).set('X-CSRF-Token', token).expect(204);
+    await request(csrfApp).post('/api/v1/csrf-probe').set('Referer', `${exactOrigin}/ar/login`).set('Cookie', `passion_csrf=${token}`).set('X-CSRF-Token', token).expect(204);
+    await request(csrfApp).post('/api/v1/csrf-probe').set('Origin', `${exactOrigin}.attacker.example`).set('Cookie', `passion_csrf=${token}`).set('X-CSRF-Token', token).expect(403);
   });
 
   it('returns a readiness-unavailable error when MongoDB is disconnected', async () => {

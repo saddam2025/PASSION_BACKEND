@@ -81,7 +81,7 @@ Also verify login, refresh, logout and a protected request from the deployed fro
 
 ## Social link preview routing
 
-The API's `GET /api/v1/seo/courses/:slug` serves crawler HTML. The public host must route requests under `/ar/courses/*` to the matching API SEO endpoint only for social crawler user agents (`facebookexternalhit`, `Facebot`, `WhatsApp`, `Twitterbot`, `LinkedInBot`). Human browser requests must continue to the frontend SPA. Preserve the requested slug so historical-slug canonical redirects work. This edge rule is pending the hosting decision; see [LINK_PREVIEW.md](LINK_PREVIEW.md). Do not send crawler routing through a rule that rewrites ordinary `/api/v1/*` requests to `index.html`.
+The Vercel rewrite in `PASSION_FRONTEND/vercel.json` sends crawler requests for `/ar/courses/:slug` and `/courses/:slug` to `GET /api/v1/seo/courses/:slug` for the configured social User-Agents, and routes API, sitemap and robots requests to Railway before the SPA fallback. Human course-page requests continue to the SPA. See [LINK_PREVIEW.md](LINK_PREVIEW.md) and [RAILWAY_DEPLOY.md](RAILWAY_DEPLOY.md).
 
 ## Atlas backup and restore
 
