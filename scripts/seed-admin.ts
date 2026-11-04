@@ -3,13 +3,13 @@ import { parseEnvironment } from '../src/config/env';
 import { createLogger } from '../src/config/logger';
 import { connectDatabase, disconnectDatabase } from '../src/services/database';
 import { seedAdmin } from '../src/services/seedAdmin';
+import { assertDatabaseTarget } from '../src/lib/databaseSafety';
 
 async function main() {
   const environment = parseEnvironment();
   const allowTestDatabase = process.argv.includes('--allow-test-db');
-  let databaseName = '';
-  try { databaseName = decodeURIComponent(new URL(environment.MONGODB_URI).pathname.slice(1).split('/')[0] ?? ''); } catch { /* parseEnvironment already validates URI */ }
-  if (databaseName.endsWith('_test') && !allowTestDatabase) throw new Error('Refusing to seed an _test database. Pass --allow-test-db only for an intentional test run.');
+  const confirmedDatabase = process.argv.find((argument) => argument.startsWith('--confirm-db='))?.slice('--confirm-db='.length);
+  assertDatabaseTarget(environment.MONGODB_URI, confirmedDatabase, allowTestDatabase);
   const logger = createLogger(environment.LOG_LEVEL);
   await connectDatabase(environment.MONGODB_URI, logger);
   try {

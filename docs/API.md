@@ -9,7 +9,9 @@ All routes are versioned under `/api/v1`. Responses use JSON. Errors use `{ "err
 | `GET /api/v1/health` | Public | No parameters or body | `200 { "status": "ok" }` (liveness only; does not depend on MongoDB) | `404` for unknown paths; standard error envelope |
 | `GET /api/v1/health/ready` | Public | No parameters or body | `200 { "status": "ready", "database": "ok", "version": "0.1.0" }` after MongoDB ping | `503 { "error": { "code": "DATABASE_UNAVAILABLE", "message": "Database is not ready", "requestId": "…" } }` when MongoDB is not reachable |
 
-Readiness never includes driver details or connection strings. `GET /api/v1/health` is liveness-only and remains available independently of MongoDB. The server refuses to listen when required environment variables are missing or malformed; connection failures print a URI-safe message. At boot, the database connector reports whether the server advertises replica-set support (required for transactions).
+Readiness never includes driver details or connection strings. `GET /api/v1/health` is liveness-only and remains available independently of MongoDB. In production the server refuses to listen unless `MONGODB_URI` identifies a credentialed replica set and the live MongoDB handshake confirms replica-set support; `APP_BASE_URL` and every CORS origin must be HTTPS; CORS origins must be exact origins without wildcards or paths; cookies must be Secure and use the `__Host-` names; all six R2 variables must be configured; and configured secrets must meet the minimum length and not be sample values. Startup errors identify variable names only. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
+`TRUST_PROXY_HOPS` defaults to `0` and sets Express's trusted proxy depth. Set it only to the verified number of reverse-proxy hops; `req.ip` is used for IP rate-limit keys. The HTTP logger omits request IP and redacts credential, email, and phone fields. `npm run indexes:sync` and `npm run seed:admin` require `--confirm-db=<exact database name>`; `_test` databases additionally require the deliberate `--allow-test-db` flag.
 
 ### BE-1 database integration test setup
 

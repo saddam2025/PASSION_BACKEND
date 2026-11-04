@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export const PermissionKey = {
   viewLeads: 'viewLeads',
   updateFollowUp: 'updateFollowUp',
@@ -69,4 +71,3 @@ export interface PermissionUser {
 export function hasPermission(user: PermissionUser, key: PermissionKey): boolean {
   return user.role === 'admin' || rolePermissionDefaults.assistant.includes(key);
 }
-import { z } from 'zod';

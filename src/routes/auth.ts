@@ -5,7 +5,7 @@ import type pino from 'pino';
 import type { AppEnvironment } from '../config/env';
 import { asyncHandler } from '../lib/asyncHandler';
 import { RateLimitError } from '../lib/errors';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 import { csrfController, csrfProtection } from '../middleware/csrf';
 import { validateRequest } from '../middleware/validation';
 import { changePasswordBodySchema, inviteAcceptBodySchema, inviteTokenParamsSchema, loginBodySchema, resetConfirmBodySchema, resetRequestBodySchema } from '../shared/schemas/authEndpoints';
@@ -34,8 +34,8 @@ export function authRouter(environment: AppEnvironment, logger: pino.Logger, tra
     clearAuthCookies(res, environment);
     res.status(204).end();
   }));
-  router.get('/me', requireAuth(environment), (req, res) => res.json({ user: req.auth }));
-  router.post('/change-password', ...csrfProtection(environment), requireAuth(environment), validateRequest({ body: changePasswordBodySchema }), asyncHandler(async (req, res) => {
+  router.get('/me', requireAuth(environment), requireRole('admin', 'assistant'), (req, res) => res.json({ user: req.auth }));
+  router.post('/change-password', ...csrfProtection(environment), requireAuth(environment), requireRole('admin', 'assistant'), validateRequest({ body: changePasswordBodySchema }), asyncHandler(async (req, res) => {
     await authService.changePassword(req.auth!.id, req.body.currentPassword, req.body.password, logger);
     clearAuthCookies(res, environment);
     res.status(204).end();

@@ -1,15 +1,35 @@
 import mongoose from 'mongoose';
 import type pino from 'pino';
 
+export function assertReplicaSetCapability(hello: { setName?: string } | undefined, required: boolean): void {
+  if (required && !hello?.setName) throw new Error('MONGODB_URI must connect to a MongoDB replica set.');
+}
+
 export async function connectDatabase(
   uri: string,
   logger: pino.Logger,
-  options: { dbName?: string; humanReadable?: boolean } = {},
+  options: { dbName?: string; humanReadable?: boolean; requireReplicaSet?: boolean } = {},
 ): Promise<void> {
-  const { dbName, humanReadable = false } = options;
+  const { dbName, humanReadable = false, requireReplicaSet = false } = options;
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 5_000, ...(dbName ? { dbName } : {}) });
+  let hello: { setName?: string } | undefined;
   try {
-    const hello = await mongoose.connection.db?.admin().command({ hello: 1 });
+    hello = await mongoose.connection.db?.admin().command({ hello: 1 });
+  } catch {
+    if (requireReplicaSet) {
+      await mongoose.disconnect();
+      throw new Error('MONGODB_URI replica-set capability could not be verified.');
+    }
+    if (humanReadable) process.stderr.write('[MongoDB] WARNING: Could not verify replica set capability\n');
+    else logger.warn('Could not verify MongoDB replica set capability');
+  }
+  try {
+    assertReplicaSetCapability(hello, requireReplicaSet);
+  } catch (error) {
+    await mongoose.disconnect();
+    throw error;
+  }
+  if (hello) {
     if (hello?.setName) {
       if (humanReadable) process.stdout.write('[MongoDB] Replica set check passed; transactions are enabled\n');
       else logger.info({ replicaSet: hello.setName }, 'MongoDB replica set check passed; transactions are enabled');
@@ -18,9 +38,6 @@ export async function connectDatabase(
       if (humanReadable) process.stderr.write(`[MongoDB] WARNING: ${message}\n`);
       else logger.warn(message);
     }
-  } catch {
-    if (humanReadable) process.stderr.write('[MongoDB] WARNING: Could not verify replica set capability\n');
-    else logger.warn('Could not verify MongoDB replica set capability');
   }
   if (humanReadable) {
     process.stdout.write('[MongoDB] Connected\n');

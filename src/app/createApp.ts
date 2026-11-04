@@ -32,6 +32,7 @@ import { auditApiRouter } from '../routes/auditApi';
 import { coursesRouter, publicCoursesRouter } from '../routes/courses';
 import { overviewRouter } from '../routes/overview';
 import { seoRouter } from '../routes/seo';
+import type { MountedRouteRouter } from '../security/routeInventory';
 
 export interface AppOptions {
   logger?: pino.Logger;
@@ -45,7 +46,7 @@ export interface AppOptions {
 function safeRequestUrl(value: string): string {
   return value
     .replace(/\/(invites|invite|reset-password)\/[^/?]+/gi, '/$1/[REDACTED]')
-    .replace(/([?&](?:token|code)=)[^&]+/gi, '$1[REDACTED]');
+    .replace(/([?&](?:token|code|email|phone|name)=)[^&]*/gi, '$1[REDACTED]');
 }
 
 export function createApp(environment: AppEnvironment, options: AppOptions = {}): Express {
@@ -53,7 +54,7 @@ export function createApp(environment: AppEnvironment, options: AppOptions = {})
   const logger = options.logger ?? createLogger(environment.LOG_LEVEL);
   const allowedOrigins = new Set(environment.CORS_ORIGINS);
   app.set('env', environment.NODE_ENV);
-  app.set('trust proxy', false);
+  app.set('trust proxy', environment.TRUST_PROXY_HOPS);
 
   app.use(requestIdMiddleware);
   app.use((request, response, next) => {
@@ -69,7 +70,6 @@ export function createApp(environment: AppEnvironment, options: AppOptions = {})
           id: request.id,
           method: request.method,
           url: safeRequestUrl(request.url ?? ''),
-          remoteAddress: request.remoteAddress,
         };
       },
     },
@@ -118,24 +118,28 @@ export function createApp(environment: AppEnvironment, options: AppOptions = {})
   app.use(hpp());
   app.use(mongoSanitize({ replaceWith: '_' }));
 
-  app.use('/api/v1', healthRouter);
   const emailTransport = options.emailTransport ?? createEmailTransport(environment);
-  app.use('/api/v1/auth', authRouter(environment, logger, emailTransport));
-  app.use('/api/v1/users', usersRouter(environment, logger));
-  app.use('/api/v1/invites', invitesRouter(environment, logger, emailTransport));
-  app.use('/api/v1/public', publicRegistrationsRouter(environment, logger, options.publicRegistrationRateLimits));
-  app.use('/api/v1/public/courses', publicCoursesRouter());
-  app.use('/api/v1/enrollments', enrollmentsRouter(environment, logger));
-  app.use('/api/v1/leads', leadsRouter(environment));
-  app.use('/api/v1/notifications', notificationsRouter(environment, logger));
-  app.use('/api/v1/payments', paymentsRouter(environment, logger));
-  app.use('/api/v1/media', mediaRouter(environment, logger));
-  app.use('/api/v1/settings', settingsApiRouter(environment, logger));
-  app.use('/api/v1/categories', categoriesApiRouter(environment, logger));
-  app.use('/api/v1/audit', auditApiRouter(environment, logger));
-  app.use('/api/v1/courses', coursesRouter(environment));
-  app.use('/api/v1/admin/overview', overviewRouter(environment));
-  app.use('/api/v1/seo', seoRouter(environment));
+  const routeRouters: MountedRouteRouter[] = [
+    { path: '/api/v1', router: healthRouter },
+    { path: '/api/v1/auth', router: authRouter(environment, logger, emailTransport) },
+    { path: '/api/v1/users', router: usersRouter(environment, logger) },
+    { path: '/api/v1/invites', router: invitesRouter(environment, logger, emailTransport) },
+    { path: '/api/v1/public', router: publicRegistrationsRouter(environment, logger, options.publicRegistrationRateLimits) },
+    { path: '/api/v1/public/courses', router: publicCoursesRouter() },
+    { path: '/api/v1/enrollments', router: enrollmentsRouter(environment, logger) },
+    { path: '/api/v1/leads', router: leadsRouter(environment) },
+    { path: '/api/v1/notifications', router: notificationsRouter(environment, logger) },
+    { path: '/api/v1/payments', router: paymentsRouter(environment, logger) },
+    { path: '/api/v1/media', router: mediaRouter(environment, logger) },
+    { path: '/api/v1/settings', router: settingsApiRouter(environment, logger) },
+    { path: '/api/v1/categories', router: categoriesApiRouter(environment, logger) },
+    { path: '/api/v1/audit', router: auditApiRouter(environment, logger) },
+    { path: '/api/v1/courses', router: coursesRouter(environment) },
+    { path: '/api/v1/admin/overview', router: overviewRouter(environment) },
+    { path: '/api/v1/seo', router: seoRouter(environment) },
+  ];
+  app.locals.securityRouteRouters = routeRouters;
+  for (const mount of routeRouters) app.use(mount.path, mount.router);
   options.registerRoutes?.(app);
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -5,7 +5,7 @@ import type pino from 'pino';
 import type { AppEnvironment } from '../config/env';
 import { asyncHandler } from '../lib/asyncHandler';
 import { ValidationError } from '../lib/errors';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth, requirePermission, requireRole } from '../middleware/auth';
 import { csrfProtection } from '../middleware/csrf';
 import { validateRequest } from '../middleware/validation';
 import { mediaIdParamsSchema, mediaListQuerySchema } from '../shared/schemas/media';
@@ -34,8 +34,8 @@ export function mediaRouter(environment: AppEnvironment, logger: pino.Logger, me
     response.status(201).json(await mediaService.uploadImage({ buffer: request.file.buffer, originalname: request.file.originalname, size: request.file.size }, actor(request)));
   }));
   router.get('/', admin, validateRequest({ query: mediaListQuerySchema }), asyncHandler(async (request, response) => response.json(await mediaService.list(request.query as never, actor(request)))));
-  router.get('/receipts/:id/url', validateRequest({ params: mediaIdParamsSchema }), asyncHandler(async (request, response) => response.json(await mediaService.receiptUrl(String(request.params.id), actor(request)))));
-  router.post('/receipts', ...csrfProtection(environment), uploadLimit, (req, res, next) => receiptUpload(req, res, (error) => error ? uploadError(error, req, res, next) : next()), asyncHandler(async (request, response) => {
+  router.get('/receipts/:id/url', requirePermission('viewPayments'), validateRequest({ params: mediaIdParamsSchema }), asyncHandler(async (request, response) => response.json(await mediaService.receiptUrl(String(request.params.id), actor(request)))));
+  router.post('/receipts', requirePermission('recordPayments'), ...csrfProtection(environment), uploadLimit, (req, res, next) => receiptUpload(req, res, (error) => error ? uploadError(error, req, res, next) : next()), asyncHandler(async (request, response) => {
     if (!request.file) throw new ValidationError('اختار إيصال للرفع.', [{ field: 'file', code: 'required' }]);
     response.status(201).json(await mediaService.uploadReceipt({ buffer: request.file.buffer, originalname: request.file.originalname, size: request.file.size }, actor(request)));
   }));

@@ -115,6 +115,25 @@ describe('BE-1 HTTP foundation', () => {
     expect(response.body.error.code).toBe('RATE_LIMITED');
   });
 
+  it('keys rate limits by X-Forwarded-For only when TRUST_PROXY_HOPS is enabled', async () => {
+    const noProxyTrust = createApp(environment, { logger: createLogger('silent'), rateLimitMax: 1 });
+    await request(noProxyTrust).get('/api/v1/health').set('X-Forwarded-For', '203.0.113.10').expect(200);
+    await request(noProxyTrust).get('/api/v1/health').set('X-Forwarded-For', '198.51.100.11').expect(429);
+
+    const trustedEnvironment = parseEnvironment({
+      NODE_ENV: 'test', PORT: '4000', TRUST_PROXY_HOPS: '1',
+      MONGODB_URI: 'mongodb://127.0.0.1:27017/passion?replicaSet=rs0',
+      ACCESS_TOKEN_SECRET: 'access-secret-for-http-tests-only-0000001',
+      REFRESH_TOKEN_SECRET: 'refresh-secret-for-http-tests-only-0002',
+      COOKIE_DOMAIN: 'localhost', COOKIE_SECURE: 'false', CORS_ORIGINS: 'http://localhost:5173',
+      APP_BASE_URL: 'http://localhost:5173', LOG_LEVEL: 'silent',
+    });
+    const trustedProxy = createApp(trustedEnvironment, { logger: createLogger('silent'), rateLimitMax: 1 });
+    await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '203.0.113.10').expect(200);
+    await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '198.51.100.11').expect(200);
+    await request(trustedProxy).get('/api/v1/health').set('X-Forwarded-For', '203.0.113.10').expect(429);
+  });
+
   it('returns a readiness-unavailable error when MongoDB is disconnected', async () => {
     const response = await request(app).get('/api/v1/health/ready').expect(503);
     expect(response.body.error).toMatchObject({

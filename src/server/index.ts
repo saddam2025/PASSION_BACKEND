@@ -4,6 +4,7 @@ import { createApp } from '../app/createApp';
 import { createLogger } from '../config/logger';
 import { parseEnvironment } from '../config/env';
 import { connectDatabase, disconnectDatabase } from '../services/database';
+import { registerGracefulShutdown } from './shutdown';
 
 async function startServer(): Promise<void> {
   let environment;
@@ -17,7 +18,7 @@ async function startServer(): Promise<void> {
 
   const logger = createLogger(environment.LOG_LEVEL);
   try {
-    await connectDatabase(environment.MONGODB_URI, logger, { humanReadable: environment.NODE_ENV === 'development' });
+    await connectDatabase(environment.MONGODB_URI, logger, { humanReadable: environment.NODE_ENV === 'development', requireReplicaSet: environment.NODE_ENV === 'production' });
   } catch {
     process.stderr.write('Database connection failed. Check that MONGODB_URI is valid and the database is reachable.\n');
     process.exitCode = 1;
@@ -30,21 +31,7 @@ async function startServer(): Promise<void> {
     else logger.info({ port: address.port }, 'API server listening');
   });
 
-  let shuttingDown = false;
-  const shutdown = (signal: string): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info({ signal }, 'Graceful shutdown started');
-    server.close((error) => {
-      if (error) logger.error({ err: error }, 'HTTP server shutdown failed');
-      void disconnectDatabase().finally(() => {
-        if (error) process.exitCode = 1;
-        logger.info('Shutdown complete');
-      });
-    });
-  };
-  process.once('SIGINT', () => shutdown('SIGINT'));
-  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  registerGracefulShutdown(server, disconnectDatabase, logger);
 }
 
 void startServer().catch((error: unknown) => {
