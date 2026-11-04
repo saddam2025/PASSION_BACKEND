@@ -97,6 +97,19 @@ describe('BE-6 media upload, privacy and usage (Atlas + in-memory storage)', () 
     }
   });
 
+  it('accepts safely decodable GIF, TIFF and AVIF uploads and re-encodes each as WebP', async () => {
+    const make = () => sharp({ create: { width: 8, height: 8, channels: 3, background: '#38a' } });
+    const samples = [
+      ['animated.gif', await make().gif().toBuffer()],
+      ['scan.tiff', await make().tiff().toBuffer()],
+      ['photo.avif', await make().avif().toBuffer()],
+    ] as const;
+    for (const [filename, buffer] of samples) {
+      const created = await service.uploadImage(upload(buffer, filename), admin);
+      expect(created.mime, filename).toBe('image/webp');
+      expect((await sharp((await storage.get('public', created.key))!.body).metadata()).format).toBe('webp');
+    }
+  });
   it('rejects bytes renamed as jpg, SVG, polyglot/invalid bytes, files above 5 MB and excessive pixel dimensions', async () => {
     await expectValidation(service.uploadImage(upload(Buffer.from('not an image'), 'renamed.jpg'), admin));
     await expectValidation(service.uploadImage(upload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), 'image.svg'), admin));

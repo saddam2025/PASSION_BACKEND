@@ -13,6 +13,7 @@ import { writeAudit } from './audit';
 import { hasPermission as roleHasPermission } from '../shared/schemas/permissions';
 
 const MAX_PIXELS = 40_000_000;
+const SUPPORTED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/avif', 'image/heif', 'image/heic', 'image/heif-sequence', 'image/heic-sequence'] as const;
 const IMAGE_MAX = 5 * 1024 * 1024;
 const RECEIPT_MAX = 8 * 1024 * 1024;
 type UploadFile = { buffer: Buffer; originalname: string; size: number };
@@ -37,7 +38,7 @@ export class MediaService {
     if (file.size > IMAGE_MAX) throw new ValidationError('حجم الصورة لازم يكون 5 ميجابايت أو أقل.', [{ field: 'file', code: 'too_big' }]);
     const detected = await fromBuffer(file.buffer);
     const mime = detected?.mime;
-    if (!mime || !['image/jpeg', 'image/png', 'image/webp'].includes(mime)) throw new ValidationError('نوع الصورة ده مش مدعوم. ارفع صورة بصيغة JPEG أو PNG أو WebP.', [{ field: 'file', code: 'unsupported_type' }]);
+    if (!mime || !(SUPPORTED_IMAGE_MIMES as readonly string[]).includes(mime)) throw new ValidationError('صيغة الصورة دي مش مدعومة. الصيغ المقبولة: JPEG وPNG وWebP وGIF وTIFF وAVIF وHEIF.', [{ field: 'file', code: 'unsupported_type' }]);
     let metadata: sharp.Metadata;
     try { metadata = await sharp(file.buffer, { limitInputPixels: MAX_PIXELS, failOn: 'error' }).metadata(); }
     catch { throw new ValidationError('ملف الصورة غير صالح أو أبعاده أكبر من الحد المسموح.', [{ field: 'file', code: 'invalid_image' }]); }
@@ -69,7 +70,7 @@ export class MediaService {
     if (!hasRecordPermission(actor)) throw new ForbiddenError('الصلاحية دي مش متاحة لحسابك.');
     if (file.size > RECEIPT_MAX) throw new ValidationError('حجم الإيصال لازم يكون 8 ميجابايت أو أقل.', [{ field: 'file', code: 'too_big' }]);
     const detected = await fromBuffer(file.buffer);
-    if (!detected || !['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(detected.mime)) throw new ValidationError('نوع الإيصال ده مش مدعوم.', [{ field: 'file', code: 'unsupported_type' }]);
+    if (!detected || (!(SUPPORTED_IMAGE_MIMES as readonly string[]).includes(detected.mime) && detected.mime !== 'application/pdf')) throw new ValidationError('صيغة الإيصال دي مش مدعومة.', [{ field: 'file', code: 'unsupported_type' }]);
     let stored: Buffer = file.buffer;
     let storedMime = detected.mime;
     let width: number | undefined;
