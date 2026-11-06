@@ -36,7 +36,7 @@ export function enrollmentsRouter(environment: AppEnvironment, logger: pino.Logg
     const now = new Date();
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Cairo', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now).map((part) => [part.type, part.value]));
     const filename = `registrations-${parts.year}${parts.month}${parts.day}.csv`;
-    const headers = ['رقم التسجيل', 'الاسم', 'البريد الإلكتروني', 'رقم الهاتف', 'الكورس', 'حالة التسجيل', 'حالة المتابعة', 'المسؤول', 'تاريخ التسجيل'];
+    const headers = ['رقم التسجيل', 'الاسم', 'البريد الإلكتروني', 'رقم الهاتف', 'الكورس', 'الجمهور', 'العملة', 'حالة التسجيل', 'حالة المتابعة', 'المسؤول', 'تاريخ التسجيل'];
     if (exported.includePayments) headers.push('حالة الدفع', 'صافي المدفوع', 'المتبقي');
     response.status(200).set({ 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'no-store' });
     let rowCount = 0;
@@ -44,7 +44,7 @@ export function enrollmentsRouter(environment: AppEnvironment, logger: pino.Logg
     try {
       await write(`\uFEFF${csvLine(headers)}`);
       for await (const row of exported.cursor) {
-        const values: unknown[] = [row.reference, row.lead.fullName, row.lead.email, row.lead.phone, row.courseTitle, row.enrollmentStatus, row.followUpStatus, row.assignedTo, cairoCsvDate(row.registeredAt)];
+        const values: unknown[] = [row.reference, row.lead.fullName, row.lead.email, row.lead.phone, row.courseTitle, row.audience ?? 'egyptian', row.priceSnapshot.currency, row.enrollmentStatus, row.followUpStatus, row.assignedTo, cairoCsvDate(row.registeredAt)];
         if (exported.includePayments) {
           const netMinor = row.paymentSummary?.netMinor ?? 0;
           const currency = row.priceSnapshot.currency;
@@ -103,7 +103,7 @@ export function enrollmentsRouter(environment: AppEnvironment, logger: pino.Logg
   }));
 
   router.get('/:id', requirePermission('viewLeads'), validateRequest({ params: enrollmentIdParamsSchema }), asyncHandler(async (request, response) => {
-    response.json({ enrollment: await staffRecordsService.getEnrollment(String(request.params.id)) });
+    response.json({ enrollment: await staffRecordsService.getEnrollment(String(request.params.id), request.auth!) });
   }));
 
   return router;

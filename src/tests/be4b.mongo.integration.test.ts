@@ -41,12 +41,12 @@ async function createCourse(slug: string, options: { status?: 'draft' | 'publish
   const title = options.title ?? 'كورس تجريبي';
   return Course.create({ _id: id, slug, slugHistory: options.oldSlug ? [options.oldSlug] : [], status: options.status ?? 'published', featured: false, createdBy: adminId, publishedAt: new Date('2026-10-01T10:00:00Z'), draft: { details: { title: { ar: title }, shortDescription: { ar: 'وصف تجريبي' }, coverImage: { src: options.image ?? 'media/cover.webp' } }, page: { schemaVersion: 1, sections: [] }, form: { fields: [] }, seo: {} }, published: options.status === 'draft' ? null : { details: { title: { ar: title }, shortDescription: { ar: 'وصف تجريبي' }, coverImage: { src: options.image ?? 'media/cover.webp' } }, page: { schemaVersion: 1, sections: [] }, form: { fields: [] }, seo: { title: { ar: title }, description: { ar: 'وصف تجريبي' }, ogImage: options.image ? { src: options.image } : undefined, noindex: options.noindex } } });
 }
-async function createEnrollment(course: Awaited<ReturnType<typeof createCourse>>, input: { reference: string; registeredAt: string; status?: 'pending' | 'confirmed' | 'cancelled'; paymentStatus?: string }) {
+async function createEnrollment(course: Awaited<ReturnType<typeof createCourse>>, input: { reference: string; registeredAt: string; status?: 'pending' | 'confirmed' | 'cancelled'; paymentStatus?: string; currency?: 'EGP' | 'USD'; amount?: number }) {
   const lead = await Lead.create({ fullName: 'عميل اختباري', email: `${input.reference.toLowerCase()}@example.test`, phone: '01012345678', phoneNormalized: '201012345678', consent: { acceptedAt: new Date(), policyVersion: 1 }, attribution: {} });
-  return Enrollment.create({ reference: input.reference, leadId: lead._id, courseId: course._id, courseSnapshot: { title: { ar: course.published?.details?.title?.ar ?? 'كورس تجريبي' }, slug: course.slug }, priceSnapshot: { amount: 1_000, currency: 'EGP' }, consent: { acceptedAt: new Date(), policyVersion: 1 }, formSnapshot: { fields: [] }, answers: {}, enrollmentStatus: input.status ?? 'pending', followUpStatus: 'new', isActive: input.status !== 'cancelled', registeredAt: new Date(input.registeredAt), idempotencyKey: `be4b-enrollment-${input.reference}`, paymentSummary: { netMinor: 0, status: input.paymentStatus ?? 'unpaid', lastPaymentAt: null } });
+  return Enrollment.create({ reference: input.reference, leadId: lead._id, courseId: course._id, courseSnapshot: { title: { ar: course.published?.details?.title?.ar ?? 'كورس تجريبي' }, slug: course.slug }, priceSnapshot: { amount: input.amount ?? 1_000, currency: input.currency ?? 'EGP' }, audience: input.currency === 'USD' ? 'foreign' : 'egyptian', consent: { acceptedAt: new Date(), policyVersion: 1 }, formSnapshot: { fields: [] }, answers: {}, enrollmentStatus: input.status ?? 'pending', followUpStatus: 'new', isActive: input.status !== 'cancelled', registeredAt: new Date(input.registeredAt), idempotencyKey: `be4b-enrollment-${input.reference}`, paymentSummary: { netMinor: 0, currency: input.currency ?? 'EGP', status: input.paymentStatus ?? 'unpaid', lastPaymentAt: null } });
 }
-async function createPayment(enrollmentId: mongoose.Types.ObjectId, recorderId: mongoose.Types.ObjectId, key: string, overrides: Partial<{ kind: 'payment' | 'refund'; status: 'confirmed' | 'voided'; receivedAt: Date; amount: number }> = {}) {
-  const record = await Payment.create({ enrollmentId, kind: overrides.kind ?? 'payment', amount: overrides.amount ?? 1_000, currency: 'EGP', method: 'cash', receivedAt: overrides.receivedAt ?? new Date(), status: 'confirmed', recordedBy: recorderId, confirmedBy: recorderId, idempotencyKey: key });
+async function createPayment(enrollmentId: mongoose.Types.ObjectId, recorderId: mongoose.Types.ObjectId, key: string, overrides: Partial<{ kind: 'payment' | 'refund'; status: 'confirmed' | 'voided'; receivedAt: Date; amount: number; currency: 'EGP' | 'USD' }> = {}) {
+  const record = await Payment.create({ enrollmentId, kind: overrides.kind ?? 'payment', amount: overrides.amount ?? 1_000, currency: overrides.currency ?? 'EGP', method: 'cash', receivedAt: overrides.receivedAt ?? new Date(), status: 'confirmed', recordedBy: recorderId, confirmedBy: recorderId, idempotencyKey: key });
   if (overrides.status === 'voided') await Payment.collection.updateOne({ _id: record._id }, { $set: { status: 'voided', voidedAt: new Date(), voidedBy: recorderId, voidReason: 'سجل تجريبي' } });
   return record;
 }
@@ -80,6 +80,7 @@ describe('BE-4B overview aggregation and role policy', () => {
     await createPayment(at2330._id, adminId, 'be4b-overview-voided', { receivedAt: new Date('2026-11-01T21:30:00Z'), status: 'voided' });
     const result = await request(app).get('/api/v1/admin/overview?from=2026-11-01&to=2026-11-01').set('Cookie', adminCookie).expect(200);
     expect(result.body).toMatchObject({ registrations: 3, paid: 1, unpaid: 1, netRevenue: 1_300, courses: [{ title: 'كورس تجريبي', registrations: 3, paid: 1, revenue: 1_300, currency: 'EGP' }] });
+    expect(result.body.revenueByCurrency).toEqual([{ currency: 'EGP', netRevenue: 1_300, paidCount: 1, unpaidCount: 1 }, { currency: 'USD', netRevenue: 0, paidCount: 0, unpaidCount: 0 }]);
     expect((await request(app).get('/api/v1/admin/overview').set('Cookie', assistantCookie)).status).toBe(403);
     await request(app).get('/api/v1/admin/overview').expect(401);
     const empty = await request(app).get('/api/v1/admin/overview?from=2026-11-03&to=2026-11-04').set('Cookie', adminCookie).expect(200);
@@ -88,6 +89,19 @@ describe('BE-4B overview aggregation and role policy', () => {
     expect(enrollmentIndexes.some((index) => index.key.registeredAt === 1 && index.key.courseId === 1)).toBe(true);
     expect(paymentIndexes.some((index) => index.key.status === 1 && index.key.currency === 1 && index.key.receivedAt === 1)).toBe(true);
     expect(afterDay).toBeTruthy();
+  });
+
+  it('reports mixed EGP and USD revenue separately without conversion or a combined total', async () => {
+    const course = await createCourse('overview-mixed-currencies');
+    const egp = await createEnrollment(course, { reference: 'PAS-AB2346', registeredAt: '2026-11-02T10:00:00Z', paymentStatus: 'paid', amount: 10_000 });
+    const usd = await createEnrollment(course, { reference: 'PAS-CD2347', registeredAt: '2026-11-02T11:00:00Z', paymentStatus: 'paid', amount: 8_000, currency: 'USD' });
+    const unpaidUsd = await createEnrollment(course, { reference: 'PAS-EF2348', registeredAt: '2026-11-02T12:00:00Z', currency: 'USD' });
+    await createPayment(egp._id, adminId, 'be4b-mixed-egp-payment', { amount: 7_000, currency: 'EGP', receivedAt: new Date('2026-11-02T10:00:00Z') });
+    await createPayment(usd._id, adminId, 'be4b-mixed-usd-payment', { amount: 5_000, currency: 'USD', receivedAt: new Date('2026-11-02T11:00:00Z') });
+    const result = await request(app).get('/api/v1/admin/overview?from=2026-11-02&to=2026-11-02').set('Cookie', adminCookie).expect(200);
+    expect(result.body).toMatchObject({ registrations: 3, netRevenue: 7_000, revenueByCurrency: [{ currency: 'EGP', netRevenue: 7_000, paidCount: 1, unpaidCount: 0 }, { currency: 'USD', netRevenue: 5_000, paidCount: 1, unpaidCount: 1 }], courses: [{ revenue: 7_000, currency: 'EGP', netByCurrency: { EGP: 7_000, USD: 5_000 } }] });
+    expect(result.body).not.toHaveProperty('totalRevenueAllCurrencies');
+    expect(unpaidUsd).toBeTruthy();
   });
 
   it('gives the Assistant fixed payment rights, own-payment void only, and keeps restricted actions Admin-only', async () => {

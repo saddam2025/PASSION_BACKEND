@@ -32,4 +32,31 @@ describe('BE-4 shared course validation', () => {
     snapshot.form.fields = [{ id: 'topic', type: 'select', label: { ar: 'الموضوع', en: '' }, required: true, options: [{ value: 'one', label: { ar: 'اختيار', en: '' } }] }];
     expect(SnapshotSchema.safeParse(snapshot).success).toBe(false);
   });
+
+  it('keeps old course data valid, strips disabled foreign fields, and validates USD pricing', () => {
+    const old = createCourseTemplateSnapshot({ title: { ar: 'عنوان الكورس' }, category: 'التصميم', template: 'blank' });
+    const legacyDetails = { ...old.details } as Record<string, unknown>;
+    delete legacyDetails.foreignPricing;
+    expect(SnapshotSchema.safeParse({ ...old, details: legacyDetails }).success).toBe(true);
+    const disabled = SnapshotSchema.parse({ ...old, details: { ...old.details, foreignPricing: { enabled: false, price: 9_000, promoPrice: 8_000, currency: 'USD', contactUs: true } } });
+    expect(disabled.details.foreignPricing).toEqual({ enabled: false });
+    for (const pricing of [
+      { enabled: true, price: 10_000, promoPrice: 10_000, currency: 'USD' },
+      { enabled: true, price: -1, promoPrice: null, currency: 'USD' },
+      { enabled: true, price: 10.5, promoPrice: null, currency: 'USD' },
+      { enabled: true, price: 10_000, promoPrice: null, currency: 'EGP' },
+    ]) expect(SnapshotSchema.safeParse({ ...old, details: { ...old.details, foreignPricing: pricing } }).success).toBe(false);
+    expect(SnapshotSchema.safeParse({ ...old, details: { ...old.details, foreignPricing: { enabled: true, price: 10_000, promoPrice: 7_500, currency: 'USD' } } }).success).toBe(true);
+  });
+
+  it('requires a foreign price or contact option only when foreign pricing is enabled', () => {
+    const snapshot = createCourseTemplateSnapshot({ title: { ar: 'عنوان الكورس' }, category: 'التصميم', template: 'blank' });
+    snapshot.details.foreignPricing = { enabled: true, price: null, promoPrice: null, currency: 'USD' };
+    expect(checkReadiness(snapshot).errors).toContainEqual(expect.objectContaining({ path: 'details.foreignPricing.price' }));
+    snapshot.details.foreignPricing.contactUs = true;
+    expect(checkReadiness(snapshot).errors.some((entry) => entry.path.startsWith('details.foreignPricing'))).toBe(false);
+    snapshot.details.foreignPricing.enabled = false;
+    snapshot.details.foreignPricing.contactUs = false;
+    expect(checkReadiness(snapshot).errors.some((entry) => entry.path.startsWith('details.foreignPricing'))).toBe(false);
+  });
 });

@@ -78,7 +78,7 @@ function asStatusRecords(records: readonly PaymentRow[]): PaymentStatusRecord[] 
 function summaryFor(enrollment: SummaryEnrollment, records: readonly PaymentRow[]) {
   const active = records.filter((record) => record.status === 'confirmed');
   const lastPaymentAt = active.reduce<Date | null>((latest, item) => !latest || item.receivedAt > latest ? item.receivedAt : latest, null);
-  return { netMinor: Math.max(confirmedNet(asStatusRecords(records)), 0), status: derivePaymentStatus(enrollment, asStatusRecords(records)), lastPaymentAt };
+  return { netMinor: Math.max(confirmedNet(asStatusRecords(records)), 0), currency: enrollment.priceSnapshot.currency, status: derivePaymentStatus(enrollment, asStatusRecords(records)), lastPaymentAt };
 }
 export async function recomputePaymentSummary(enrollmentId: mongoose.Types.ObjectId | string, session?: ClientSession) {
   let enrollmentQuery = Enrollment.findById(enrollmentId);

@@ -53,13 +53,14 @@ function paymentInput(overrides: Record<string, unknown> = {}) {
 async function createEnrollment(index: number, options: { price?: number | null; currency?: string; fullName?: string; courseId?: mongoose.Types.ObjectId } = {}) {
   const lead = await Lead.create({ fullName: options.fullName ?? `عميل دفعات ${index}`, email: `pay-${index}-${crypto.randomUUID()}@example.test`, phone: '01012345678', phoneNormalized: `201012${String(index).padStart(6, '0')}`, consent: { acceptedAt: new Date(), policyVersion: 1 }, attribution: {} });
   const courseId = options.courseId ?? new mongoose.Types.ObjectId();
-  const enrollment = await Enrollment.create({ reference: `PAS-${['A','B','C','D','E','F','G','H','J','K','L','M'][index % 12]}${['N','P','Q','R','S','T','U','V','W','X','Y','Z'][index % 12]}2345`, leadId: lead._id, courseId, courseSnapshot: { title: { ar: `كورس دفعات ${index}` }, slug: `payment-course-${index}` }, priceSnapshot: { amount: options.price === undefined ? 10_000 : options.price, currency: options.currency ?? 'EGP' }, consent: { acceptedAt: new Date(), policyVersion: 1 }, formSnapshot: { fields: [] }, answers: {}, enrollmentStatus: 'pending', followUpStatus: 'new', isActive: true, registeredAt: new Date(), idempotencyKey: `enroll-payment-${index}-${crypto.randomUUID()}` });
+  const enrollment = await Enrollment.create({ reference: `PAS-${['A','B','C','D','E','F','G','H','J','K','L','M'][index % 12]}${['N','P','Q','R','S','T','U','V','W','X','Y','Z'][index % 12]}2345`, leadId: lead._id, courseId, courseSnapshot: { title: { ar: `كورس دفعات ${index}` }, slug: `payment-course-${index}` }, priceSnapshot: { amount: options.price === undefined ? 10_000 : options.price, currency: options.currency ?? 'EGP' }, audience: options.currency === 'USD' ? 'foreign' : 'egyptian', consent: { acceptedAt: new Date(), policyVersion: 1 }, formSnapshot: { fields: [] }, answers: {}, enrollmentStatus: 'pending', followUpStatus: 'new', isActive: true, registeredAt: new Date(), idempotencyKey: `enroll-payment-${index}-${crypto.randomUUID()}` });
   return { lead, enrollment };
 }
 async function expectSummary(enrollmentId: mongoose.Types.ObjectId, expected: string) {
   const stored = (await Enrollment.findById(enrollmentId).select('paymentSummary').lean())?.paymentSummary;
   const fresh = await recomputePaymentSummary(enrollmentId);
   expect(stored?.netMinor).toBe(fresh.netMinor);
+  expect(stored?.currency ?? 'EGP').toBe(fresh.currency);
   expect(stored?.status).toBe(fresh.status);
   expect(stored?.lastPaymentAt?.toISOString() ?? null).toBe(fresh.lastPaymentAt?.toISOString() ?? null);
   expect(stored?.status).toBe(expected);
@@ -202,6 +203,30 @@ describe('BE-5C payments, derived summaries and export (Atlas passion_test)', ()
     await expectSummary(enrollment._id, 'cancelled');
   });
 
+  it('keeps USD payment, refund, void bounds, and summaries in USD minor units', async () => {
+    const { enrollment } = await createEnrollment(2, { price: 10_000, currency: 'USD' });
+    const admin = await login(client());
+    const mismatch = await post(admin, `/api/v1/enrollments/${enrollment._id}/payments`, paymentInput({ currency: 'EGP', amount: 10_000 })).expect(422);
+    expect(mismatch.body.error.details).toContainEqual(expect.objectContaining({ field: 'currency' }));
+    const payment = await post(admin, `/api/v1/enrollments/${enrollment._id}/payments`, paymentInput({ currency: 'USD', amount: 10_000, idempotencyKey: 'be5c-usd-payment-0001' })).expect(201);
+    expect(payment.body.paymentSummary).toMatchObject({ netMinor: 10_000, currency: 'USD', status: 'paid', outstandingMinor: 0 });
+    await expectSummary(enrollment._id, 'paid');
+    const refund = await post(admin, `/api/v1/enrollments/${enrollment._id}/payments`, paymentInput({ kind: 'refund', currency: 'USD', amount: 3_000, idempotencyKey: 'be5c-usd-refund-0001' })).expect(201);
+    expect(refund.body.paymentSummary).toMatchObject({ netMinor: 7_000, currency: 'USD', status: 'partially_refunded', outstandingMinor: 3_000 });
+    await post(admin, `/api/v1/enrollments/${enrollment._id}/payments`, paymentInput({ kind: 'refund', currency: 'USD', amount: 7_001, idempotencyKey: 'be5c-usd-refund-over-0001' })).expect(409);
+    await post(admin, `/api/v1/payments/${payment.body.payment.id}/void`, { reason: 'إلغاء دفعة بالدولار' }).expect(409);
+    await post(admin, `/api/v1/payments/${refund.body.payment.id}/void`, { reason: 'إلغاء استرداد بالدولار' }).expect(200);
+    await expectSummary(enrollment._id, 'paid');
+    expect((await recomputePaymentSummary(enrollment._id)).currency).toBe('USD');
+    const foreignList = await admin.target.get('/api/v1/enrollments?audience=foreign').expect(200);
+    expect(foreignList.body.items[0]).toMatchObject({ id: String(enrollment._id), audience: 'foreign', priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
+    expect((await admin.target.get(`/api/v1/enrollments/${enrollment._id}`).expect(200)).body.enrollment).toMatchObject({ audience: 'foreign', priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
+    const csv = await admin.target.get('/api/v1/enrollments/export.csv').expect(200);
+    expect(csv.text).toContain('الجمهور,العملة');
+    expect(csv.text).toContain('foreign,USD');
+    expect(csv.text).toContain('100.00');
+  });
+
   it('filters and sorts enrollment/payment lists, hides summary for an actor without viewPayments, and scopes payment details', async () => {
     const courseId = new mongoose.Types.ObjectId();
     const first = await createEnrollment(6, { courseId });
@@ -264,6 +289,7 @@ describe('BE-5C payments, derived summaries and export (Atlas passion_test)', ()
     expect(csv.text.startsWith('\uFEFF')).toBe(true);
     expect(csv.text).toContain('"\'=SUM(1,2)"');
     expect(csv.text).toContain('حالة الدفع');
+    expect(csv.text).toContain('الجمهور,العملة');
     expect(csv.text).not.toMatch(/_id|payloadHash|tokenHash|idempotencyKey/);
     expect(csv.text.split('\r\n').filter(Boolean).length - 1).toBe(listed.body.total);
     expect(csv.text).toContain('30.00');

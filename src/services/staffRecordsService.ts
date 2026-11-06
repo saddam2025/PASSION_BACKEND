@@ -59,6 +59,7 @@ export const staffRecordsService = {
     if ((query.paymentStatus || query.sort === 'paymentStatus') && !canSeePayments) throw new ForbiddenError('عرض حالة الدفع مش متاح لحسابك.');
     const match: Record<string, unknown> = {};
     if (query.courseId) match.courseId = new mongoose.Types.ObjectId(query.courseId);
+    if (query.audience) match.audience = query.audience;
     if (query.enrollmentStatus) match.enrollmentStatus = query.enrollmentStatus;
     if (query.followUpStatus) match.followUpStatus = query.followUpStatus;
     if (query.paymentStatus) match['paymentSummary.status'] = query.paymentStatus;
@@ -105,7 +106,7 @@ export const staffRecordsService = {
             _id: 1, reference: 1,
             lead: { fullName: '$lead.fullName', email: '$lead.email', phone: '$lead.phone' },
             courseTitle: '$courseSnapshot.title', priceSnapshot: 1,
-            enrollmentStatus: 1, followUpStatus: 1,
+            audience: { $ifNull: ['$audience', 'egyptian'] }, enrollmentStatus: 1, followUpStatus: 1,
             paymentSummary: 1,
             assignedTo: { _id: '$assignee._id', name: '$assignee.name' }, registeredAt: 1,
           } },
@@ -122,9 +123,10 @@ export const staffRecordsService = {
         lead: item.lead,
         courseTitle: arabicName(item.courseTitle),
         priceSnapshot: item.priceSnapshot,
+        audience: item.audience ?? 'egyptian',
         enrollmentStatus: item.enrollmentStatus,
         followUpStatus: item.followUpStatus,
-        ...(canSeePayments ? { paymentSummary: item.paymentSummary ?? { netMinor: 0, status: 'unpaid', lastPaymentAt: null } } : {}),
+        ...(canSeePayments ? { paymentSummary: { ...(item.paymentSummary as Record<string, unknown> | undefined ?? { netMinor: 0, status: 'unpaid', lastPaymentAt: null }), currency: (item.priceSnapshot as { currency?: string } | undefined)?.currency ?? 'EGP' } } : {}),
         assignedTo: assignee?.name ? { id: id(assignee._id), name: { ar: assignee.name } } : null,
         registeredAt: item.registeredAt,
       };
@@ -132,7 +134,7 @@ export const staffRecordsService = {
     return { items, total: result?.total[0]?.value ?? 0, page: query.page, pageSize: query.pageSize };
   },
 
-  async getEnrollment(idValue: string) {
+  async getEnrollment(idValue: string, actor?: AuthActor) {
     const enrollmentId = requireObjectId(idValue);
     const enrollment = await Enrollment.findById(enrollmentId).lean();
     if (!enrollment) throw new NotFoundError('السجل ده مش موجود.');
@@ -161,6 +163,8 @@ export const staffRecordsService = {
       lead: { id: id(lead._id), fullName: lead.fullName, email: lead.email, phone: lead.phone, phoneNormalized: lead.phoneNormalized },
       courseSnapshot: { title: arabicName(enrollment.courseSnapshot?.title), slug: enrollment.courseSnapshot?.slug },
       priceSnapshot: enrollment.priceSnapshot,
+      audience: enrollment.audience ?? 'egyptian',
+      ...(actor && roleHasPermission(actor, 'viewPayments') ? { paymentSummary: { ...(enrollment.paymentSummary ?? { netMinor: 0, status: 'unpaid', lastPaymentAt: null }), currency: enrollment.priceSnapshot?.currency ?? 'EGP' } } : {}),
       formSnapshot: enrollment.formSnapshot,
       answers: enrollment.answers instanceof Map ? Object.fromEntries(enrollment.answers) : enrollment.answers,
       enrollmentStatus: enrollment.enrollmentStatus,
@@ -201,7 +205,7 @@ export const staffRecordsService = {
     enrollment.history.push({ at: new Date(), by: new mongoose.Types.ObjectId(actor.id), from: before, to: input.followUpStatus, ...(input.note ? { note: plainText(input.note).slice(0, 1_000) } : {}) });
     await enrollment.save();
     await writeAudit({ actorId: actor.id, action: 'enrollment.follow_up_changed', entityType: 'enrollment', entityId: idValue, beforeStatus: before, afterStatus: input.followUpStatus }, logger);
-    return this.getEnrollment(idValue);
+    return this.getEnrollment(idValue, actor);
   },
 
   async assign(idValue: string, actor: AuthActor, assigneeId: string | null, logger: pino.Logger) {
@@ -220,7 +224,7 @@ export const staffRecordsService = {
     enrollment.history.push({ at: new Date(), by: new mongoose.Types.ObjectId(actor.id), from: previous, to: next, note: 'تحديث التعيين' });
     await enrollment.save();
     await writeAudit({ actorId: actor.id, action: 'enrollment.assigned', entityType: 'enrollment', entityId: idValue, beforeStatus: previous || 'unassigned', afterStatus: next || 'unassigned' }, logger);
-    return this.getEnrollment(idValue);
+    return this.getEnrollment(idValue, actor);
   },
 
   async confirm(idValue: string, actor: AuthActor, reason: string | undefined, logger: pino.Logger) {
@@ -235,7 +239,7 @@ export const staffRecordsService = {
     enrollment.history.push({ at: new Date(), by: new mongoose.Types.ObjectId(actor.id), from: before, to: 'confirmed', ...(cleanReason ? { note: cleanReason } : {}) });
     await enrollment.save();
     await writeAudit({ actorId: actor.id, action: 'enrollment.confirmed', entityType: 'enrollment', entityId: idValue, beforeStatus: before, afterStatus: 'confirmed' }, logger);
-    return this.getEnrollment(idValue);
+    return this.getEnrollment(idValue, actor);
   },
 
   async cancel(idValue: string, actor: AuthActor, reason: string, logger: pino.Logger) {
@@ -251,7 +255,7 @@ export const staffRecordsService = {
     await enrollment.save();
     await refreshEnrollmentPaymentSummary(enrollment._id);
     await writeAudit({ actorId: actor.id, action: 'enrollment.cancelled', entityType: 'enrollment', entityId: idValue, beforeStatus: before, afterStatus: 'cancelled' }, logger);
-    return this.getEnrollment(idValue);
+    return this.getEnrollment(idValue, actor);
   },
 
   async logWhatsappContact(idValue: string, actor: AuthActor, logger: pino.Logger) {
@@ -260,7 +264,7 @@ export const staffRecordsService = {
     enrollment.history.push({ at: new Date(), by: new mongoose.Types.ObjectId(actor.id), from: current, to: current, note: 'تم فتح واتساب للتواصل، من غير تأكيد إرسال رسالة.' });
     await enrollment.save();
     await writeAudit({ actorId: actor.id, action: 'enrollment.whatsapp_contact_logged', entityType: 'enrollment', entityId: idValue, beforeStatus: current, afterStatus: current }, logger);
-    return this.getEnrollment(idValue);
+    return this.getEnrollment(idValue, actor);
   },
 
   async listNotes(idValue: string, query: NotesListQuery) {

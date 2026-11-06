@@ -11,6 +11,7 @@ const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
 const enrollmentListQueryObjectSchema = z.object({
   search: z.string().trim().max(120).optional(),
   courseId: objectId.optional(),
+  audience: z.enum(['egyptian', 'foreign']).optional(),
   enrollmentStatus: z.enum(['pending', 'confirmed', 'cancelled']).optional(),
   followUpStatus: z.enum(['new', 'contacted', 'interested', 'awaiting_payment', 'no_answer', 'not_interested', 'closed']).optional(),
   paymentStatus: PaymentStatusSchema.exclude(['failed']).optional(),

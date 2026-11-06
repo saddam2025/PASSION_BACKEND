@@ -144,6 +144,32 @@ describe('BE-4 courses API and service', () => {
     expect(response.body.course).not.toHaveProperty('id');
     expect((await request(app).get('/api/v1/public/courses/course-public').set('If-None-Match', response.headers.etag!)).status).toBe(304);
   });
+  it('publishes enabled foreign pricing, exposes only its public USD block, and hides the disabled block', async () => {
+    const enabled = snapshot('سعر الأجانب');
+    (enabled.details as typeof enabled.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: true, price: 25_000, promoPrice: 18_000, currency: 'USD' };
+    const created = await coursesService.create({ slug: 'course-foreign-price', draft: enabled }, actor);
+    const published = await coursesService.publish(created.id, created.version, actor);
+    expect(published.status).toBe('published');
+    const publicResponse = await request(app).get('/api/v1/public/courses/course-foreign-price').expect(200);
+    expect(publicResponse.body.course.foreignPricing).toEqual({ enabled: true, price: 25_000, promoPrice: 18_000, currency: 'USD' });
+    expect(JSON.stringify(publicResponse.body.course.foreignPricing)).not.toMatch(/_id|createdBy|bucket|url/i);
+
+    const disabled = snapshot('سعر مصري فقط');
+    (disabled.details as typeof disabled.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: false, price: 20_000, promoPrice: 10_000, currency: 'USD' };
+    const disabledCourse = await coursesService.create({ slug: 'course-egyptian-only', draft: disabled }, actor);
+    await coursesService.publish(disabledCourse.id, disabledCourse.version, actor);
+    const disabledResponse = await request(app).get('/api/v1/public/courses/course-egyptian-only').expect(200);
+    expect(disabledResponse.body.course).not.toHaveProperty('foreignPricing');
+  });
+  it('blocks publishing when enabled foreign pricing has neither an amount nor contact pricing', async () => {
+    const draft = snapshot('سعر أجنبي ناقص');
+    (draft.details as typeof draft.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: true, price: null, promoPrice: null, currency: 'USD' };
+    const created = await coursesService.create({ slug: 'course-foreign-price-missing', draft }, actor);
+    await expect(coursesService.publish(created.id, created.version, actor)).rejects.toMatchObject({
+      statusCode: 422,
+      details: expect.arrayContaining([expect.objectContaining({ field: 'details.foreignPricing.price' })]),
+    });
+  });
   it('uses the same public 404 for absent and unpublished courses, and resolves old slug to current slug', async () => {
     const created = await coursesService.create({ slug: 'course-old', draft: snapshot() }, actor);
     const unavailable = await request(app).get('/api/v1/public/courses/course-old');

@@ -90,11 +90,12 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-function requestFingerprint(body: PublicRegistrationBody, values: { fullName: string; email: string; phone: string; phoneNormalized: string; customAnswers: Record<string, string | boolean> }, secret: string): string {
+function requestFingerprint(body: PublicRegistrationBody, audience: 'egyptian' | 'foreign', values: { fullName: string; email: string; phone: string; phoneNormalized: string; customAnswers: Record<string, string | boolean> }, secret: string): string {
   const attribution = normalizeAttribution(body.attribution);
   const submittedAnswers = Object.fromEntries(Object.entries(answerObject(body)).filter(([key]) => !CORE_ANSWER_KEYS.has(key)));
   const normalized = {
     courseSlug: body.courseSlug,
+    audience,
     fullName: values.fullName,
     email: values.email,
     phone: values.phone,
@@ -194,7 +195,21 @@ function courseTitleFrom(course: Awaited<ReturnType<typeof getPublishedForRegist
   return { ar: title };
 }
 
-function priceSnapshot(course: Awaited<ReturnType<typeof getPublishedForRegistration>>): { amount: number | null; currency: string } {
+function selectedAudience(body: PublicRegistrationBody, course: Awaited<ReturnType<typeof getPublishedForRegistration>>): 'egyptian' | 'foreign' {
+  const foreignPricing = course.published?.details?.foreignPricing as { enabled?: boolean } | undefined;
+  if (foreignPricing?.enabled !== true) return 'egyptian';
+  if (body.audience !== 'egyptian' && body.audience !== 'foreign') {
+    throw new ValidationError('اختار نوع التسجيل.', [{ field: 'audience', message: 'اختار إذا كان التسجيل للمصريين أو للأجانب.' }]);
+  }
+  return body.audience;
+}
+
+function priceSnapshot(course: Awaited<ReturnType<typeof getPublishedForRegistration>>, audience: 'egyptian' | 'foreign'): { amount: number | null; currency: string } {
+  if (audience === 'foreign') {
+    const pricing = (course.published?.details?.foreignPricing ?? {}) as Record<string, unknown>;
+    const amount = typeof pricing.promoPrice === 'number' ? pricing.promoPrice : typeof pricing.price === 'number' ? pricing.price : null;
+    return { amount: Number.isInteger(amount) && amount !== null && amount >= 0 ? amount : null, currency: 'USD' };
+  }
   const pricing = (course.published?.details?.pricing ?? {}) as Record<string, unknown>;
   const promo = pricing.promo ?? pricing.promoPrice;
   const price = pricing.price;
@@ -236,13 +251,14 @@ export async function submitPublicRegistration(body: PublicRegistrationBody, env
   }
 
   const courseAnswers = Object.fromEntries(Object.entries(sourceAnswers).filter(([key]) => !CORE_ANSWER_KEYS.has(key)));
+  const course = await getPublishedForRegistration(body.courseSlug);
+  const audience = selectedAudience(body, course);
   const baseValues = { fullName, email, phone, phoneNormalized, customAnswers: courseAnswers };
-  const fingerprint = requestFingerprint(body, baseValues, environment.ACCESS_TOKEN_SECRET);
+  const fingerprint = requestFingerprint(body, audience, baseValues, environment.ACCESS_TOKEN_SECRET);
   const replay = await matchingIdempotency(body.idempotencyKey, fingerprint);
   if (replay) return replay;
   if (isAutomatedSubmission(body)) return neutralResponse();
 
-  const course = await getPublishedForRegistration(body.courseSlug);
   await assertRegistrationOpen(course);
   const details = course.published?.details ?? {};
   const title = courseTitleFrom(course);
@@ -253,7 +269,7 @@ export async function submitPublicRegistration(body: PublicRegistrationBody, env
   const policyVersion = await consentPolicyVersion();
   const formSnapshot = { fields: fields.map((field) => ({ id: field.id, label: { ar: tx(field.label) }, type: field.type })) };
   const answers = { fullName, email, phone, ...customAnswers };
-  const snapshotPrice = priceSnapshot(course);
+  const snapshotPrice = priceSnapshot(course, audience);
   const enrollmentConfig = details.enrollment as Record<string, unknown> | undefined;
 
   let outcome: RegistrationResult | undefined;
@@ -294,6 +310,7 @@ export async function submitPublicRegistration(body: PublicRegistrationBody, env
           courseId: course._id,
           courseSnapshot: { title, slug: course.slug },
           priceSnapshot: snapshotPrice,
+          audience,
           consent: { acceptedAt: now, policyVersion },
           formSnapshot,
           answers,

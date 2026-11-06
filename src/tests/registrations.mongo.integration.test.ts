@@ -59,10 +59,11 @@ function postRegistration(body: Record<string, unknown>, target = requestAgent()
   return target.post('/api/v1/public/registrations').set('Origin', origin).send(body);
 }
 
-async function createCourse(overrides: { slug?: string; status?: string; registrationOpen?: boolean; capacity?: number | null; deletedAt?: Date | null; price?: number | null; promo?: number | null; title?: string } = {}) {
+async function createCourse(overrides: { slug?: string; status?: string; registrationOpen?: boolean; capacity?: number | null; deletedAt?: Date | null; price?: number | null; promo?: number | null; title?: string; foreignPricing?: Record<string, unknown> } = {}) {
   const details = {
     title: { ar: overrides.title ?? 'كورس تجريبي' },
     pricing: { price: overrides.price ?? 10_000, promo: overrides.promo ?? 8_000, currency: 'EGP' },
+    ...(overrides.foreignPricing ? { foreignPricing: overrides.foreignPricing } : {}),
     enrollment: { registrationOpen: overrides.registrationOpen ?? true, capacity: overrides.capacity ?? null },
   };
   const snapshot = { details, page: { schemaVersion: 1, sections: [] }, form: { fields: answerFields }, seo: {} };
@@ -338,5 +339,27 @@ describe('BE-5A public registrations', () => {
     await requestAgent().post('/api/v1/public/registrations').send(body).expect(403);
     await requestAgent().post('/api/v1/public/registrations').set('Origin', 'https://untrusted.example').send(body).expect(403);
     await postRegistration(body).expect(201);
+  });
+
+  it('requires the foreign audience only when enabled, snapshots published USD promo, ignores client prices, and keeps duplicate enrollment neutral', async () => {
+    const course = await createCourse({ foreignPricing: { enabled: true, price: 25_000, promoPrice: 18_000, currency: 'USD' } });
+    const missing = await postRegistration(validBody({}));
+    expect(missing.status).toBe(422);
+    expect(missing.body.error.details).toContainEqual(expect.objectContaining({ field: 'audience' }));
+    const invalid = await postRegistration(validBody({ audience: 'visitor' }));
+    expect(invalid.status).toBe(422);
+    expect(invalid.body.error.details).toContainEqual(expect.objectContaining({ field: 'audience' }));
+    const firstBody = validBody({ audience: 'foreign', amount: 1, currency: 'EGP' });
+    const first = await postRegistration(firstBody).expect(201);
+    const stored = await Enrollment.findOne({ reference: first.body.reference }).lean();
+    expect(stored).toMatchObject({ audience: 'foreign', priceSnapshot: { amount: 18_000, currency: 'USD' } });
+    expect(stored).not.toHaveProperty('amount');
+    const duplicate = await postRegistration(validBody({ audience: 'egyptian', email: firstBody.email }));
+    expect(duplicate.status).toBe(201);
+    expect(duplicate.body).toEqual({ reference: first.body.reference, status: 'received' });
+    expect(await Enrollment.countDocuments({ courseId: course._id })).toBe(1);
+    const disabledCourse = await createCourse({ slug: 'disabled-foreign-course', foreignPricing: { enabled: false, price: 70_000, promoPrice: 10_000, currency: 'USD' } });
+    const ignored = await postRegistration(validBody({ courseSlug: disabledCourse.slug, audience: 'not-audience' })).expect(201);
+    expect(await Enrollment.findOne({ reference: ignored.body.reference }).lean()).toMatchObject({ audience: 'egyptian', priceSnapshot: { amount: 8_000, currency: 'EGP' } });
   });
 });
