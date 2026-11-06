@@ -21,9 +21,11 @@ const schema = new Schema({
   payloadHash: { type: String, match: /^[a-f0-9]{64}$/i, select: false, immutable: true },
 }, strictOptions);
 schema.index({ enrollmentId: 1, receivedAt: -1 });
+schema.index({ enrollmentId: 1, status: 1, kind: 1 });
 schema.index({ idempotencyKey: 1 }, { unique: true });
 schema.index({ status: 1, method: 1, kind: 1, receivedAt: -1 });
 schema.index({ status: 1, currency: 1, receivedAt: 1, kind: 1 });
+schema.index({ status: 1, receivedAt: 1, kind: 1, currency: 1 });
 schema.index({ receivedAt: -1, _id: -1 });
 const immutablePaths = new Set(['enrollmentId', 'kind', 'amount', 'currency', 'method', 'reference', 'note', 'receiptMediaKey', 'receivedAt', 'recordedBy', 'confirmedBy', 'idempotencyKey', 'payloadHash']);
 schema.pre('save', async function () {

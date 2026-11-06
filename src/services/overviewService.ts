@@ -3,20 +3,22 @@ import { cairoDayRange } from '../lib/time';
 import { Enrollment } from '../models/Enrollment';
 import { Course } from '../models/Course';
 import { Payment } from '../models/Payment';
-import type { OverviewQuery } from '../shared/schemas/overview';
+import { overviewStartsInFuture, type OverviewQuery } from '../shared/schemas/overview';
 
-type Currency = 'EGP' | 'USD';
+type Currency = string;
 type CourseOverview = { id: Types.ObjectId; title: string; registrations: number; paid: number };
-const currencies: Currency[] = ['EGP', 'USD'];
+const legacyCurrencies: Currency[] = ['EGP', 'USD'];
 
 function rangeMatch(query: OverviewQuery): Record<string, unknown> {
+  if (overviewStartsInFuture(query)) return { _id: { $exists: false } };
   const range = cairoDayRange(query.from, query.to);
   if (!range.from && !range.to) return {};
   return { registeredAt: { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lte: range.to } : {}) } };
 }
 function paymentRangeMatch(query: OverviewQuery): Record<string, unknown> {
+  if (overviewStartsInFuture(query)) return { _id: { $exists: false } };
   const range = cairoDayRange(query.from, query.to);
-  return { status: 'confirmed', currency: { $in: currencies }, ...(range.from || range.to ? { receivedAt: { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lte: range.to } : {}) } } : {}) };
+  return { status: 'confirmed', ...(range.from || range.to ? { receivedAt: { ...(range.from ? { $gte: range.from } : {}), ...(range.to ? { $lte: range.to } : {}) } } : {}) };
 }
 function minorNetExpression() {
   return { $cond: [{ $eq: ['$kind', 'payment'] }, '$amount', { $multiply: ['$amount', -1] }] };
@@ -63,6 +65,7 @@ export const overviewService = {
     });
     const amounts = new Map(revenueRows.map((row) => [row._id, row.revenue]));
     const counts = new Map(currencyCounts.map((row) => [row._id, row]));
+    const currencies = [...new Set([...legacyCurrencies, ...amounts.keys(), ...counts.keys()])].sort((a, b) => legacyCurrencies.indexOf(a) - legacyCurrencies.indexOf(b) || a.localeCompare(b));
     const revenueByCurrency = currencies.map((currency) => ({ currency, netRevenue: amounts.get(currency) ?? 0, paidCount: counts.get(currency)?.paid ?? 0, unpaidCount: counts.get(currency)?.unpaid ?? 0 }));
     const count = overall[0] ?? { registrations: 0, paid: 0, unpaid: 0 };
     return { from: query.from ?? '', to: query.to ?? '', totalRegistrations: totalRows[0]?.total ?? 0, registrations: count.registrations, paid: count.paid, unpaid: count.unpaid, netRevenue: amounts.get('EGP') ?? 0, revenueByCurrency, courses };

@@ -88,6 +88,8 @@ describe('BE-4B overview aggregation and role policy', () => {
     const enrollmentIndexes = await Enrollment.collection.indexes(); const paymentIndexes = await Payment.collection.indexes();
     expect(enrollmentIndexes.some((index) => index.key.registeredAt === 1 && index.key.courseId === 1)).toBe(true);
     expect(paymentIndexes.some((index) => index.key.status === 1 && index.key.currency === 1 && index.key.receivedAt === 1)).toBe(true);
+    expect(paymentIndexes.some((index) => index.key.enrollmentId === 1 && index.key.status === 1 && index.key.kind === 1)).toBe(true);
+    expect(paymentIndexes.some((index) => index.key.status === 1 && index.key.receivedAt === 1 && index.key.kind === 1 && index.key.currency === 1)).toBe(true);
     expect(afterDay).toBeTruthy();
   });
 
@@ -118,6 +120,85 @@ describe('BE-4B overview aggregation and role policy', () => {
     await write(assistantCookie, 'post', `/api/v1/enrollments/${mine._id}/confirm`).send({}).expect(403);
     await request(app).get('/api/v1/enrollments/export.csv').set('Cookie', assistantCookie).expect(403);
     await write(assistantCookie, 'post', `/api/v1/payments/${recorded.body.payment.id}/void`).send({ reason: 'محاولة تانية' }).expect(404);
+  });
+});
+
+describe('BE-CHARTS overview ranges and chart aggregations', () => {
+  it('uses typed validation for malformed, reversed, oversized and future ranges', async () => {
+    const malformed = await request(app).get('/api/v1/admin/overview/charts?from=2026-02-30').set('Cookie', adminCookie).expect(422);
+    expect(malformed.body.error.code).toBe('VALIDATION_ERROR');
+    expect(malformed.body.error.details[0].path).toContain('from');
+    const reversed = await request(app).get('/api/v1/admin/overview?from=2026-11-03&to=2026-11-02').set('Cookie', adminCookie).expect(422);
+    expect(reversed.body.error.code).toBe('INVALID_RANGE');
+    expect(reversed.body.error.details[0].path).toContain('to');
+    const tooLarge = await request(app).get('/api/v1/admin/overview/charts?from=2025-01-01&to=2026-02-05').set('Cookie', adminCookie).expect(422);
+    expect(tooLarge.body.error.code).toBe('RANGE_TOO_LARGE');
+    const future = await request(app).get('/api/v1/admin/overview/charts?from=2099-01-01&to=2099-01-03').set('Cookie', adminCookie).expect(200);
+    expect(future.body).toMatchObject({ registrations: 0, paid: 0, registrationsSeries: [], revenueSeriesByCurrency: [], byCourse: [] });
+  });
+
+  it('selects day/week/month granularity at 62/63 and 400/401 day boundaries', async () => {
+    const query = async (from: string, to: string) => (await request(app).get(`/api/v1/admin/overview/charts?from=${from}&to=${to}`).set('Cookie', adminCookie).expect(200)).body.range.granularity;
+    expect(await query('2020-01-01', '2020-03-02')).toBe('day');
+    expect(await query('2020-01-01', '2020-03-03')).toBe('week');
+    expect(await query('2020-01-01', '2021-02-03')).toBe('week');
+    expect(await query('2020-01-01', '2021-02-04')).toBe('month');
+  });
+
+  it('zero-fills Cairo day buckets and aggregates cohort, payment, refund, void, funnel, currency and course data', async () => {
+    const courseData = await Promise.all(Array.from({ length: 7 }, (_, index) => createCourse(`charts-course-${index}`, { title: `عنوان ${index}` })));
+    const registrations = await Promise.all(courseData.map((course, index) => createEnrollment(course, {
+      reference: `PAS-${['AB2345', 'CD2346', 'EF2347', 'GH2348', 'JK2349', 'LM2356', 'NP2357'][index]}`,
+      registeredAt: index === 0 ? '2026-11-01T22:30:00.000Z' : index === 1 ? '2026-11-02T21:30:00.000Z' : '2026-11-02T10:00:00.000Z',
+      ...(index === 6 ? { status: 'cancelled' as const } : {}),
+      paymentStatus: index === 0 ? 'paid' : index === 1 ? 'partially_refunded' : index === 5 ? 'refunded' : 'unpaid',
+      currency: index === 1 ? 'USD' : 'EGP',
+      amount: 10_000,
+    })));
+    await createPayment(registrations[0]!._id, adminId, 'becharts-day-one-pay', { receivedAt: new Date('2026-11-01T22:30:00.000Z'), amount: 10_000 });
+    await createPayment(registrations[1]!._id, adminId, 'becharts-day-two-pay', { receivedAt: new Date('2026-11-02T21:30:00.000Z'), amount: 8_000, currency: 'USD' });
+    await Payment.create({ enrollmentId: registrations[1]!._id, kind: 'refund', amount: 2_000, currency: 'USD', method: 'cash', receivedAt: new Date('2026-11-03T10:00:00.000Z'), status: 'confirmed', recordedBy: adminId, confirmedBy: adminId, idempotencyKey: 'becharts-day-three-refund' });
+    await createPayment(registrations[2]!._id, adminId, 'becharts-voided-payment', { receivedAt: new Date('2026-11-02T10:00:00.000Z'), status: 'voided' });
+    await Payment.create({ enrollmentId: registrations[3]!._id, kind: 'refund', amount: 500, currency: 'EGP', method: 'cash', receivedAt: new Date('2026-11-03T10:00:00.000Z'), status: 'confirmed', recordedBy: adminId, confirmedBy: adminId, idempotencyKey: 'becharts-egp-refund' });
+    await Enrollment.updateOne({ _id: registrations[4]!._id }, { $set: { followUpStatus: 'new' } });
+    const result = await request(app).get('/api/v1/admin/overview/charts?from=2026-11-02&to=2026-11-04').set('Cookie', adminCookie).expect(200);
+    expect(result.body.range).toEqual({ from: '2026-11-02', to: '2026-11-04', granularity: 'day' });
+    expect(result.body.registrationsSeries).toEqual([
+      { bucket: '2026-11-02', registrations: 2, paid: 1 },
+      { bucket: '2026-11-03', registrations: 5, paid: 0 },
+      { bucket: '2026-11-04', registrations: 0, paid: 0 },
+    ]);
+    expect(result.body.revenueSeriesByCurrency).toEqual([
+      { currency: 'EGP', series: [{ bucket: '2026-11-02', netRevenue: 10_000 }, { bucket: '2026-11-03', netRevenue: -500 }, { bucket: '2026-11-04', netRevenue: 0 }] },
+      { currency: 'USD', series: [{ bucket: '2026-11-02', netRevenue: 0 }, { bucket: '2026-11-03', netRevenue: 6_000 }, { bucket: '2026-11-04', netRevenue: 0 }] },
+    ]);
+    expect(result.body.funnel).toMatchObject({ registered: 6, contacted: 2, awaitingPayment: 1, paid: 1, cancelled: 1 });
+    expect(result.body.funnel.registered).toBeGreaterThanOrEqual(result.body.funnel.contacted);
+    expect(result.body.funnel.contacted).toBeGreaterThanOrEqual(result.body.funnel.awaitingPayment);
+    expect(result.body.funnel.awaitingPayment).toBeGreaterThanOrEqual(result.body.funnel.paid);
+    expect(result.body.paymentStatusDistribution).toEqual(expect.arrayContaining([{ status: 'paid', count: 1 }, { status: 'partially_refunded', count: 1 }, { status: 'refunded', count: 1 }, { status: 'cancelled', count: 1 }]));
+    expect(result.body.byCourse).toHaveLength(6);
+    expect(result.body.byCourse[5]).toMatchObject({ courseId: 'other', registrations: 2 });
+    expect(result.body.byAudience).toEqual(expect.arrayContaining([expect.objectContaining({ audience: 'egyptian' }), expect.objectContaining({ audience: 'foreign' })]));
+    expect(result.body.revenueSeriesByCurrency).not.toHaveProperty('totalRevenue');
+
+    const overview = await request(app).get('/api/v1/admin/overview?from=2026-11-02&to=2026-11-04').set('Cookie', adminCookie).expect(200);
+    expect(result.body.registrations).toBe(overview.body.registrations);
+    expect(result.body.paid).toBe(overview.body.paid);
+    expect(result.body.netRevenueByCurrency).toEqual(overview.body.revenueByCurrency.map((row: { currency: string; netRevenue: number }) => ({ currency: row.currency, netRevenue: row.netRevenue })));
+    for (const currency of overview.body.revenueByCurrency) {
+      const chartTotal = result.body.revenueSeriesByCurrency.find((row: { currency: string }) => row.currency === currency.currency)?.series.reduce((sum: number, point: { netRevenue: number }) => sum + point.netRevenue, 0) ?? 0;
+      expect(chartTotal).toBe(currency.netRevenue);
+    }
+  });
+
+  it('returns valid empty charts, remains Admin-only, and rejects bad input without a 500', async () => {
+    await request(app).get('/api/v1/admin/overview/charts').expect(401);
+    await request(app).get('/api/v1/admin/overview/charts').set('Cookie', assistantCookie).expect(403);
+    const empty = await request(app).get('/api/v1/admin/overview/charts?from=2030-01-01&to=2030-01-03').set('Cookie', adminCookie).expect(200);
+    expect(empty.body).toMatchObject({ registrations: 0, paid: 0, registrationsSeries: [], revenueSeriesByCurrency: [], funnel: { registered: 0, contacted: 0, awaitingPayment: 0, paid: 0, cancelled: 0 }, paymentStatusDistribution: [], byCourse: [] });
+    await request(app).get('/api/v1/admin/overview?from=not-a-date').set('Cookie', adminCookie).expect(422);
+    await request(app).get('/api/v1/admin/overview/charts?to=2026-99-99').set('Cookie', adminCookie).expect(422);
   });
 });
 
