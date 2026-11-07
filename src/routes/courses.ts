@@ -4,7 +4,7 @@ import { asyncHandler } from '../lib/asyncHandler';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { csrfProtection } from '../middleware/csrf';
 import { validateRequest } from '../middleware/validation';
-import { courseIdParamsSchema, courseListQuerySchema, publicCourseListQuerySchema as zPublicCourseListQuerySchema, checkCourseSlugQuerySchema, createCourseBodySchema, featuredCourseBodySchema, publishCourseBodySchema, saveCourseDraftBodySchema, softDeleteBodySchema } from '../shared/schemas/coursesApi';
+import { courseIdParamsSchema, courseListQuerySchema, publicCourseListQuerySchema as zPublicCourseListQuerySchema, checkCourseSlugQuerySchema, createCourseBodySchema, duplicateCourseBodySchema, featuredCourseBodySchema, publishCourseBodySchema, saveCourseDraftBodySchema, softDeleteBodySchema } from '../shared/schemas/coursesApi';
 import { coursesService, courseEtag } from '../services/coursesService';
 import type { AuthActor } from '../types/express';
 import { NotFoundError } from '../lib/errors';
@@ -17,6 +17,7 @@ export function coursesRouter(environment: AppEnvironment) {
   router.get('/', validateRequest({ query: courseListQuerySchema }), asyncHandler(async (req, res) => res.set('Cache-Control', noCache).json(await coursesService.list(req.query as never))));
   router.get('/check-slug', validateRequest({ query: checkCourseSlugQuerySchema }), asyncHandler(async (req, res) => res.set('Cache-Control', noCache).json(await coursesService.checkSlug(String(req.query.slug), req.query.exceptId as string | undefined))));
   router.post('/', ...csrfProtection(environment), validateRequest({ body: createCourseBodySchema }), asyncHandler(async (req, res) => res.status(201).set('Cache-Control', noCache).json({ course: await coursesService.create(req.body, req.auth as AuthActor) })));
+  router.post('/:id/duplicate', ...csrfProtection(environment), validateRequest({ params: courseIdParamsSchema, body: duplicateCourseBodySchema }), asyncHandler(async (req, res) => res.status(201).set('Cache-Control', noCache).json({ course: await coursesService.duplicate(String(req.params.id), req.body, req.auth as AuthActor) })));
   router.patch('/:id/featured', ...csrfProtection(environment), validateRequest({ params: courseIdParamsSchema, body: featuredCourseBodySchema }), asyncHandler(async (req, res) => res.set('Cache-Control', noCache).json({ course: await coursesService.setFeatured(String(req.params.id), req.body.featured, req.auth as AuthActor) })));
   router.get('/:id', validateRequest({ params: courseIdParamsSchema }), asyncHandler(async (req, res) => res.set('Cache-Control', noCache).json({ course: await coursesService.get(String(req.params.id)) })));
   router.put('/:id/draft', ...csrfProtection(environment), validateRequest({ params: courseIdParamsSchema, body: saveCourseDraftBodySchema }), asyncHandler(async (req, res) => res.set('Cache-Control', noCache).json({ course: await coursesService.saveDraft(String(req.params.id), req.body.expectedVersion, req.body.draft, req.auth as AuthActor) })));

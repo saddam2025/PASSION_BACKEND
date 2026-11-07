@@ -20,6 +20,7 @@ export const createCourseBodySchema = z.union([
   z.object({ slug, draft: SnapshotSchema, featured: z.boolean().optional() }).strict(),
   z.object({ slug, title: BilingualTextSchema, category: z.string().trim().min(1).max(100), template: z.enum(['full', 'short', 'blank']).default('full'), featured: z.boolean().optional() }).strict(),
 ]);
+export const duplicateCourseBodySchema = z.object({ slug, title: BilingualTextSchema }).strict();
 export const saveCourseDraftBodySchema = z.object({ expectedVersion: z.number().int().min(0), draft: SnapshotSchema }).strict();
 export const checkCourseSlugQuerySchema = z.object({ slug, exceptId: z.string().regex(/^[a-f\d]{24}$/i).optional() }).strict();
 export const publishCourseBodySchema = z.object({ expectedVersion: z.number().int().min(0) }).strict();

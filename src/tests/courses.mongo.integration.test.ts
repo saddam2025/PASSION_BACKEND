@@ -245,4 +245,98 @@ describe('BE-4 courses API and service', () => {
     expect((await coursesService.get(featuredOlder.id)).version).toBe(featuredOlderPublished.version + 1);
     expect(regularPublished.status).toBe('published');
   });
+  it('duplicates the current draft deeply, resets publication and verification state, and records only ids', async () => {
+    const sourceDraft = snapshot('الكورس الأصلي');
+    sourceDraft.details.slug = 'source-draft-slug';
+    sourceDraft.details.accreditation.verifiedByAcademy = true;
+    sourceDraft.page.sections.push({ id: 'b2222222-2222-4222-8222-222222222222', type: 'text', visible: true, content: { title: { ar: 'عنوان القسم' }, body: { ar: [] } } } as never);
+    sourceDraft.form.fields = [{ id: 'field-stable', type: 'text', label: { ar: 'الاسم' }, required: true, options: [] } as never];
+    sourceDraft.seo = { title: { ar: 'عنوان محركات البحث' }, description: { ar: 'وصف محركات البحث' }, noindex: true };
+    (sourceDraft.details as typeof sourceDraft.details & { foreignPricing: { enabled: boolean; price: number; promoPrice: number; currency: 'USD' } }).foreignPricing = { enabled: true, price: 25_000, promoPrice: 20_000, currency: 'USD' };
+    const source = await coursesService.create({ slug: 'duplicate-source', draft: sourceDraft }, actor);
+    const editedDraft = snapshot('النسخة الحالية للمسودة'); editedDraft.details.slug = 'duplicate-source';
+    editedDraft.details.shortDescription.ar = 'تعديلات غير منشورة'; editedDraft.details.accreditation.verifiedByAcademy = true;
+    const published = await coursesService.publish(source.id, source.version, actor);
+    const current = await coursesService.saveDraft(source.id, published.version, editedDraft, actor);
+
+    const duplicate = await coursesService.duplicate(source.id, { title: { ar: 'نسخة من النسخة الحالية للمسودة' }, slug: 'copy-current-draft' }, actor);
+    expect(duplicate).toMatchObject({ slug: 'copy-current-draft', slugHistory: [], status: 'draft', featured: false, version: 1, createdBy: actor.id, published: null, draft: { details: { title: { ar: 'نسخة من النسخة الحالية للمسودة' }, slug: 'copy-current-draft', shortDescription: { ar: 'تعديلات غير منشورة' }, accreditation: { verifiedByAcademy: false } } } });
+    expect(duplicate.publishedAt).toBeUndefined();
+    expect(duplicate.draft).not.toBe(current.draft);
+    expect(duplicate.draft.page.sections[0]?.id).not.toBe(current.draft.page.sections[0]?.id);
+    const after = structuredClone(duplicate.draft); after.details.shortDescription.ar = 'تعديل النسخة فقط';
+    await coursesService.saveDraft(duplicate.id, duplicate.version, after, actor);
+    expect((await coursesService.get(source.id)).draft.details.shortDescription.ar).toBe('تعديلات غير منشورة');
+    const duplicateAudit = await AuditLog.findOne({ action: 'course_duplicated', entityId: new mongoose.Types.ObjectId(duplicate.id) }).lean();
+    expect(duplicateAudit?.note).toBe(source.id);
+    expect(JSON.stringify(duplicateAudit)).not.toContain('تعديلات غير منشورة');
+    expect((await Course.findById(duplicate.id).lean())?.allSlugs).toEqual(['copy-current-draft']);
+  });
+  it('preserves the copied registration field and option ids and the complete SEO and foreign pricing blocks', async () => {
+    const sourceDraft = snapshot('نسخة بسعرين');
+    sourceDraft.form.fields = [{ id: 'stable-field', type: 'select', label: { ar: 'المسار' }, required: true, options: [{ id: 'stable-option', label: { ar: 'الأول' }, value: 'first' }, { id: 'stable-option-2', label: { ar: 'الثاني' }, value: 'second' }] } as never];
+    sourceDraft.seo = { title: { ar: 'عنوان SEO' }, description: { ar: 'وصف SEO' }, noindex: true };
+    (sourceDraft.details as typeof sourceDraft.details & { foreignPricing: { enabled: boolean; price: number; promoPrice: number; currency: 'USD' } }).foreignPricing = { enabled: true, price: 12_500, promoPrice: 10_000, currency: 'USD' };
+    const source = await coursesService.create({ slug: 'duplicate-preserve', draft: sourceDraft }, actor);
+    const copy = await coursesService.duplicate(source.id, { title: { ar: 'نسخة من سعرين' }, slug: 'duplicate-preserve-copy' }, actor);
+    expect(copy.draft.form.fields[0]).toMatchObject({ id: 'stable-field', options: [{ id: 'stable-option' }, { id: 'stable-option-2' }] });
+    expect(copy.draft.seo).toEqual((await coursesService.get(source.id)).draft.seo);
+    expect(copy.draft.details.foreignPricing).toEqual((await coursesService.get(source.id)).draft.details.foreignPricing);
+  });
+  it('rejects duplicate slugs reserved as current, historical, or soft-deleted', async () => {
+    const source = await coursesService.create({ slug: 'duplicate-slug-source', draft: snapshot() }, actor);
+    await coursesService.create({ slug: 'duplicate-taken-current', draft: snapshot() }, actor);
+    const historical = await coursesService.create({ slug: 'duplicate-taken-history', draft: snapshot() }, actor);
+    const changed = snapshot(); changed.details.slug = 'duplicate-history-current';
+    await coursesService.saveDraft(historical.id, historical.version, changed, actor);
+    const deleted = await coursesService.create({ slug: 'duplicate-taken-deleted', draft: snapshot() }, actor);
+    await coursesService.remove(deleted.id, deleted.version, actor);
+    for (const slug of ['duplicate-taken-current', 'duplicate-taken-history', 'duplicate-taken-deleted']) {
+      await expect(coursesService.duplicate(source.id, { title: { ar: 'نسخة' }, slug }, actor)).rejects.toMatchObject({ statusCode: 409 });
+    }
+  });
+  it('returns the same not-found response when the duplicate source has been soft-deleted', async () => {
+    const source = await coursesService.create({ slug: 'duplicate-deleted-source', draft: snapshot() }, actor);
+    await coursesService.remove(source.id, source.version, actor);
+    const beforeCount = await Course.countDocuments();
+    await expect(coursesService.duplicate(source.id, { title: { ar: 'نسخة من المحذوف' }, slug: 'duplicate-of-deleted' }, actor)).rejects.toMatchObject({ statusCode: 404 });
+    expect(await Course.countDocuments()).toBe(beforeCount);
+  });
+  it('adds separate media usage references for cover, section and SEO images and rolls back when a key is gone', async () => {
+    const keys = ['media/2026/11/abcdef0123456789abcdef0123456789.webp', 'media/2026/11/bcdef0123456789abcdef0123456789a.webp', 'media/2026/11/cdef0123456789abcdef0123456789ab.webp'];
+    for (const key of keys) await Media.create({ key, bucket: 'public', mime: 'image/webp', size: 200, width: 20, height: 10, uploadedBy: author, variants: [{ name: 'original', key, width: 20, height: 10, mime: 'image/webp' }] });
+    const draft = snapshot('كورس الصور'); draft.details.coverImage.src = keys[0]!;
+    draft.page.sections = [{ id: 'c3333333-3333-4333-8333-333333333333', type: 'imageText', visible: true, content: { image: { src: keys[1]!, alt: { ar: '' }, decorative: true }, title: { ar: 'صورة القسم' }, richText: { ar: [] }, checklist: [], layout: 'imageStart', imageRatio: 'landscape' } } as never];
+    draft.seo = { ogImage: { src: keys[2]!, alt: { ar: '' }, decorative: true } };
+    const source = await coursesService.create({ slug: 'duplicate-media-source', draft }, actor);
+    const copies = await Promise.all(keys.map((key) => Media.findOne({ key }).lean()));
+    const copy = await coursesService.duplicate(source.id, { title: { ar: 'نسخة من الصور' }, slug: 'duplicate-media-copy' }, actor);
+    for (const media of copies) {
+      const updated = await Media.findById(media!._id).lean();
+      expect(updated?.usages.filter((usage) => String(usage.entityId) === source.id)).toHaveLength(1);
+      expect(updated?.usages.filter((usage) => String(usage.entityId) === copy.id)).toHaveLength(1);
+    }
+    const missing = snapshot(); missing.details.coverImage.src = 'media/2026/11/def0123456789abcdef0123456789abc.webp';
+    await Course.collection.updateOne({ _id: new mongoose.Types.ObjectId(source.id) }, { $set: { draft: missing } });
+    const beforeCount = await Course.countDocuments(); const auditBefore = await AuditLog.countDocuments({ action: 'course_duplicated' });
+    await expect(coursesService.duplicate(source.id, { title: { ar: 'نسخة ناقصة' }, slug: 'duplicate-missing-media' }, actor)).rejects.toMatchObject({ statusCode: 422, details: expect.arrayContaining([expect.objectContaining({ code: 'media_not_found' })]) });
+    expect(await Course.countDocuments()).toBe(beforeCount);
+    expect(await AuditLog.countDocuments({ action: 'course_duplicated' })).toBe(auditBefore);
+  });
+  it('requires Admin, CSRF, valid inputs and an existing source for the duplicate route', async () => {
+    const source = await coursesService.create({ slug: 'duplicate-route-source', draft: snapshot() }, actor);
+    expect((await request(app).post(`/api/v1/courses/${source.id}/duplicate`).send({ title: { ar: 'نسخة' }, slug: 'duplicate-no-auth' })).status).toBe(401);
+    const assistant = await sessionFor('assistant');
+    const forbidden = await request(app).post(`/api/v1/courses/${source.id}/duplicate`).set('Origin', 'http://localhost:5173').set('Cookie', `${assistant.accessCookie}; ${assistant.csrfCookie}`).set('X-CSRF-Token', assistant.csrfToken).send({ title: { ar: 'نسخة' }, slug: 'duplicate-assistant' });
+    expect(forbidden.status).toBe(403);
+    const admin = await sessionFor('admin');
+    const noCsrf = await request(app).post(`/api/v1/courses/${source.id}/duplicate`).set('Origin', 'http://localhost:5173').set('Cookie', admin.accessCookie).send({ title: { ar: 'نسخة' }, slug: 'duplicate-no-csrf' });
+    expect(noCsrf.status).toBe(403);
+    const missingSource = await request(app).post('/api/v1/courses/aaaaaaaaaaaaaaaaaaaaaaaa/duplicate').set('Origin', 'http://localhost:5173').set('Cookie', `${admin.accessCookie}; ${admin.csrfCookie}`).set('X-CSRF-Token', admin.csrfToken).send({ title: { ar: 'نسخة' }, slug: 'duplicate-unknown' });
+    expect(missingSource.status).toBe(404);
+    const invalidSlug = await request(app).post(`/api/v1/courses/${source.id}/duplicate`).set('Origin', 'http://localhost:5173').set('Cookie', `${admin.accessCookie}; ${admin.csrfCookie}`).set('X-CSRF-Token', admin.csrfToken).send({ title: { ar: 'نسخة' }, slug: 'not valid' });
+    expect([400, 422]).toContain(invalidSlug.status);
+    const valid = await request(app).post(`/api/v1/courses/${source.id}/duplicate`).set('Origin', 'http://localhost:5173').set('Cookie', `${admin.accessCookie}; ${admin.csrfCookie}`).set('X-CSRF-Token', admin.csrfToken).send({ title: { ar: 'نسخة من الكورس' }, slug: 'duplicate-route-copy' });
+    expect(valid.status).toBe(201); expect(valid.body.course).toMatchObject({ slug: 'duplicate-route-copy', status: 'draft', featured: false, version: 1, published: null });
+  });
 });

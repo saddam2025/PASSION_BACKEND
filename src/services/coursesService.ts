@@ -120,6 +120,38 @@ export const coursesService = {
     } catch (error) { if ((error as { code?: number })?.code === 11000) throw new ConflictError('الرابط ده مستخدم قبل كده.'); throw error; }
     return project(course.toObject() as unknown as CourseProjection);
   },
+  async duplicate(id: string, input: { slug: string; title: { ar: string; en?: string } }, actor: AuthActor) {
+    if (!mongoose.isValidObjectId(id)) throw new NotFoundError('الكورس ده مش موجود.');
+    try {
+      return await withTransaction(async (session) => {
+        const source = getCourseOr404(await Course.findOne({ _id: id, deletedAt: null }).session(session));
+        // snapshot() returns a validated plain object, so no mutable references are shared.
+        const draft = snapshot(source.draft);
+        draft.details.title = { ar: input.title.ar, en: input.title.en ?? '' };
+        draft.details.slug = input.slug;
+        draft.details.accreditation.verifiedByAcademy = false;
+        draft.page.sections = draft.page.sections.map((section) => ({ ...section, id: randomUUID() }));
+        const course = new Course({
+          slug: input.slug,
+          slugHistory: [],
+          status: 'draft',
+          featured: false,
+          version: 1,
+          createdBy: new mongoose.Types.ObjectId(actor.id),
+          draft,
+          published: null,
+        });
+        await course.save({ session });
+        await addMediaUsage(course._id, { draft }, session);
+        // The audit entity is the copy; its note contains only the source id.
+        await audit(actor, 'course_duplicated', course._id, undefined, undefined, session, String(source._id));
+        return project(course.toObject() as unknown as CourseProjection);
+      });
+    } catch (error) {
+      if ((error as { code?: number })?.code === 11000) throw new ConflictError('الرابط ده مستخدم قبل كده.');
+      throw error;
+    }
+  },
   async list(query: { q?: string; status?: string; category?: string; page: number; pageSize: number; sort: string }) {
     const filter: Record<string, unknown> = {};
     if (query.status) filter.status = query.status;
