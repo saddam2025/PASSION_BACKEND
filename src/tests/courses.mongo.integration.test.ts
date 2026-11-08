@@ -6,6 +6,7 @@ import { createApp } from '../app/createApp';
 import { parseEnvironment } from '../config/env';
 import { createLogger } from '../config/logger';
 import { Course } from '../models/Course';
+import type { Snapshot } from '../shared/schemas/course';
 import { Media } from '../models/Media';
 import { AuditLog } from '../models/AuditLog';
 import { User } from '../models/User';
@@ -32,7 +33,7 @@ async function sessionFor(role: 'admin' | 'assistant') {
   return { accessCookie, csrfCookie: csrf.headers['set-cookie']?.[0]?.split(';')[0], csrfToken: csrf.body.csrfToken };
 }
 
-function snapshot(title = 'كورس تجريبي') {
+function snapshot(title = 'كورس تجريبي'): Snapshot {
   return {
     details: {
       title: { ar: title }, slug: 'course-example', shortDescription: { ar: 'وصف مختصر للكورس' }, category: 'التصميم',
@@ -41,7 +42,7 @@ function snapshot(title = 'كورس تجريبي') {
     },
     page: { schemaVersion: 1 as const, sections: [{ id: 'a1111111-1111-4111-8111-111111111111', type: 'hero' as const, visible: true, content: { title: { ar: 'ابدأ التعلم' } } }] },
     form: { fields: [] }, seo: {},
-  };
+  } as unknown as Snapshot;
 }
 
 beforeAll(async () => {
@@ -144,30 +145,23 @@ describe('BE-4 courses API and service', () => {
     expect(response.body.course).not.toHaveProperty('id');
     expect((await request(app).get('/api/v1/public/courses/course-public').set('If-None-Match', response.headers.etag!)).status).toBe(304);
   });
-  it('publishes enabled foreign pricing, exposes only its public USD block, and hides the disabled block', async () => {
-    const enabled = snapshot('سعر الأجانب');
-    (enabled.details as typeof enabled.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: true, price: 25_000, promoPrice: 18_000, currency: 'USD' };
-    const created = await coursesService.create({ slug: 'course-foreign-price', draft: enabled }, actor);
+  it('publishes one selected USD price in the public course response', async () => {
+    const selected = snapshot('سعر بالدولار');
+    selected.details.pricing = { price: 25_000, promo: 18_000, currency: 'USD' };
+    const created = await coursesService.create({ slug: 'course-usd-price', draft: selected }, actor);
     const published = await coursesService.publish(created.id, created.version, actor);
     expect(published.status).toBe('published');
-    const publicResponse = await request(app).get('/api/v1/public/courses/course-foreign-price').expect(200);
-    expect(publicResponse.body.course.foreignPricing).toEqual({ enabled: true, price: 25_000, promoPrice: 18_000, currency: 'USD' });
-    expect(JSON.stringify(publicResponse.body.course.foreignPricing)).not.toMatch(/_id|createdBy|bucket|url/i);
-
-    const disabled = snapshot('سعر مصري فقط');
-    (disabled.details as typeof disabled.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: false, price: 20_000, promoPrice: 10_000, currency: 'USD' };
-    const disabledCourse = await coursesService.create({ slug: 'course-egyptian-only', draft: disabled }, actor);
-    await coursesService.publish(disabledCourse.id, disabledCourse.version, actor);
-    const disabledResponse = await request(app).get('/api/v1/public/courses/course-egyptian-only').expect(200);
-    expect(disabledResponse.body.course).not.toHaveProperty('foreignPricing');
+    const publicResponse = await request(app).get('/api/v1/public/courses/course-usd-price').expect(200);
+    expect(publicResponse.body.course).toMatchObject({ price: 25_000, promoPrice: 18_000, currency: 'USD' });
+    expect(publicResponse.body.course).not.toHaveProperty('foreignPricing');
   });
-  it('blocks publishing when enabled foreign pricing has neither an amount nor contact pricing', async () => {
-    const draft = snapshot('سعر أجنبي ناقص');
-    (draft.details as typeof draft.details & { foreignPricing: { enabled: boolean; price: number | null; promoPrice: number | null; currency: 'USD' } }).foreignPricing = { enabled: true, price: null, promoPrice: null, currency: 'USD' };
-    const created = await coursesService.create({ slug: 'course-foreign-price-missing', draft }, actor);
+  it('blocks publishing when the selected currency has no price or contact option', async () => {
+    const draft = snapshot('سعر ناقص');
+    draft.details.pricing = { price: null, currency: 'USD' };
+    const created = await coursesService.create({ slug: 'course-selected-price-missing', draft }, actor);
     await expect(coursesService.publish(created.id, created.version, actor)).rejects.toMatchObject({
       statusCode: 422,
-      details: expect.arrayContaining([expect.objectContaining({ field: 'details.foreignPricing.price' })]),
+      details: expect.arrayContaining([expect.objectContaining({ field: 'details.pricing.price' })]),
     });
   });
   it('uses the same public 404 for absent and unpublished courses, and resolves old slug to current slug', async () => {
@@ -251,8 +245,8 @@ describe('BE-4 courses API and service', () => {
     sourceDraft.details.accreditation.verifiedByAcademy = true;
     sourceDraft.page.sections.push({ id: 'b2222222-2222-4222-8222-222222222222', type: 'text', visible: true, content: { title: { ar: 'عنوان القسم' }, body: { ar: [] } } } as never);
     sourceDraft.form.fields = [{ id: 'field-stable', type: 'text', label: { ar: 'الاسم' }, required: true, options: [] } as never];
-    sourceDraft.seo = { title: { ar: 'عنوان محركات البحث' }, description: { ar: 'وصف محركات البحث' }, noindex: true };
-    (sourceDraft.details as typeof sourceDraft.details & { foreignPricing: { enabled: boolean; price: number; promoPrice: number; currency: 'USD' } }).foreignPricing = { enabled: true, price: 25_000, promoPrice: 20_000, currency: 'USD' };
+    sourceDraft.seo = { title: { ar: 'عنوان محركات البحث', en: '' }, description: { ar: 'وصف محركات البحث', en: '' }, noindex: true };
+    sourceDraft.details.pricing = { price: 25_000, promo: 20_000, currency: 'USD' };
     const source = await coursesService.create({ slug: 'duplicate-source', draft: sourceDraft }, actor);
     const editedDraft = snapshot('النسخة الحالية للمسودة'); editedDraft.details.slug = 'duplicate-source';
     editedDraft.details.shortDescription.ar = 'تعديلات غير منشورة'; editedDraft.details.accreditation.verifiedByAcademy = true;
@@ -272,16 +266,16 @@ describe('BE-4 courses API and service', () => {
     expect(JSON.stringify(duplicateAudit)).not.toContain('تعديلات غير منشورة');
     expect((await Course.findById(duplicate.id).lean())?.allSlugs).toEqual(['copy-current-draft']);
   });
-  it('preserves the copied registration field and option ids and the complete SEO and foreign pricing blocks', async () => {
-    const sourceDraft = snapshot('نسخة بسعرين');
+  it('preserves the copied registration field and option ids and selected USD pricing', async () => {
+    const sourceDraft = snapshot('نسخة بسعر واحد');
     sourceDraft.form.fields = [{ id: 'stable-field', type: 'select', label: { ar: 'المسار' }, required: true, options: [{ id: 'stable-option', label: { ar: 'الأول' }, value: 'first' }, { id: 'stable-option-2', label: { ar: 'الثاني' }, value: 'second' }] } as never];
-    sourceDraft.seo = { title: { ar: 'عنوان SEO' }, description: { ar: 'وصف SEO' }, noindex: true };
-    (sourceDraft.details as typeof sourceDraft.details & { foreignPricing: { enabled: boolean; price: number; promoPrice: number; currency: 'USD' } }).foreignPricing = { enabled: true, price: 12_500, promoPrice: 10_000, currency: 'USD' };
+    sourceDraft.seo = { title: { ar: 'عنوان SEO', en: '' }, description: { ar: 'وصف SEO', en: '' }, noindex: true };
+    sourceDraft.details.pricing = { price: 12_500, promo: 10_000, currency: 'USD' };
     const source = await coursesService.create({ slug: 'duplicate-preserve', draft: sourceDraft }, actor);
     const copy = await coursesService.duplicate(source.id, { title: { ar: 'نسخة من سعرين' }, slug: 'duplicate-preserve-copy' }, actor);
     expect(copy.draft.form.fields[0]).toMatchObject({ id: 'stable-field', options: [{ id: 'stable-option' }, { id: 'stable-option-2' }] });
     expect(copy.draft.seo).toEqual((await coursesService.get(source.id)).draft.seo);
-    expect(copy.draft.details.foreignPricing).toEqual((await coursesService.get(source.id)).draft.details.foreignPricing);
+    expect(copy.draft.details.pricing).toEqual((await coursesService.get(source.id)).draft.details.pricing);
   });
   it('rejects duplicate slugs reserved as current, historical, or soft-deleted', async () => {
     const source = await coursesService.create({ slug: 'duplicate-slug-source', draft: snapshot() }, actor);
@@ -307,7 +301,7 @@ describe('BE-4 courses API and service', () => {
     for (const key of keys) await Media.create({ key, bucket: 'public', mime: 'image/webp', size: 200, width: 20, height: 10, uploadedBy: author, variants: [{ name: 'original', key, width: 20, height: 10, mime: 'image/webp' }] });
     const draft = snapshot('كورس الصور'); draft.details.coverImage.src = keys[0]!;
     draft.page.sections = [{ id: 'c3333333-3333-4333-8333-333333333333', type: 'imageText', visible: true, content: { image: { src: keys[1]!, alt: { ar: '' }, decorative: true }, title: { ar: 'صورة القسم' }, richText: { ar: [] }, checklist: [], layout: 'imageStart', imageRatio: 'landscape' } } as never];
-    draft.seo = { ogImage: { src: keys[2]!, alt: { ar: '' }, decorative: true } };
+    draft.seo = { ogImage: { src: keys[2]!, alt: { ar: '', en: '' }, decorative: true } };
     const source = await coursesService.create({ slug: 'duplicate-media-source', draft }, actor);
     const copies = await Promise.all(keys.map((key) => Media.findOne({ key }).lean()));
     const copy = await coursesService.duplicate(source.id, { title: { ar: 'نسخة من الصور' }, slug: 'duplicate-media-copy' }, actor);

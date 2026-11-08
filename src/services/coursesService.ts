@@ -27,10 +27,25 @@ function clean(value: unknown): unknown {
   if (value && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clean(item)]));
   return value;
 }
+function normalizeLegacyPricing(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const snapshotValue = structuredClone(value) as Record<string, unknown>;
+  const detailsValue = snapshotValue.details;
+  if (!detailsValue || typeof detailsValue !== 'object' || Array.isArray(detailsValue)) return snapshotValue;
+  const details = detailsValue as Record<string, unknown>;
+  const legacy = details.foreignPricing as { enabled?: boolean; price?: number | null; promoPrice?: number | null; contactUs?: boolean } | undefined;
+  delete details.foreignPricing;
+  if (legacy?.enabled === true) {
+    const pricing = (details.pricing && typeof details.pricing === 'object' ? details.pricing : {}) as Record<string, unknown>;
+    details.pricing = { ...pricing, price: legacy.price ?? null, promo: legacy.promoPrice ?? undefined, promoPrice: undefined, currency: 'USD', contactUs: legacy.contactUs === true };
+  }
+  return snapshotValue;
+}
 function snapshot(value: unknown): Snapshot {
   const plain = value && typeof value === 'object' && 'toObject' in value && typeof value.toObject === 'function' ? value.toObject({ depopulate: true, flattenMaps: true, versionKey: false }) : value;
-  if (Buffer.byteLength(JSON.stringify(plain ?? null), 'utf8') > 1_800_000) throw new ValidationError('حجم محتوى الكورس أكبر من الحد المسموح.');
-  const parsed = SnapshotSchema.safeParse(clean(plain));
+  const normalized = normalizeLegacyPricing(plain);
+  if (Buffer.byteLength(JSON.stringify(normalized ?? null), 'utf8') > 1_800_000) throw new ValidationError('حجم محتوى الكورس أكبر من الحد المسموح.');
+  const parsed = SnapshotSchema.safeParse(clean(normalized));
   if (!parsed.success) throw new ValidationError('راجع بيانات الكورس وحاول تاني.', parsed.error.issues.map((issue) => ({ field: issue.path.join('.'), code: issue.code })));
   return parsed.data;
 }
@@ -235,13 +250,9 @@ export const coursesService = {
 };
 
 function publicSummary(course: PublishedCourseProjection) {
-  const details = course.published.details; const pricing = details.pricing ?? {}; const instructor = details.instructor ?? {}; const seo = course.published.seo ?? {};
-  const foreignPricing = details.foreignPricing as { enabled?: boolean; price?: number | null; promoPrice?: number | null; contactUs?: boolean } | undefined;
-  const foreign = foreignPricing?.enabled === true ? {
-    enabled: true, price: foreignPricing.price ?? null, promoPrice: foreignPricing.promoPrice ?? null,
-    currency: 'USD' as const, ...(foreignPricing.contactUs === true ? { contactUs: true } : {}),
-  } : undefined;
-  return publicValue({ slug: course.slug, title: details.title, shortDescription: details.shortDescription, seoTitle: seo.title ?? details.title, seoDescription: seo.description ?? details.shortDescription, noindex: seo.noindex, ogImage: seo.ogImage, category: { ar: String(details.category ?? '') }, instructorName: instructor.name ?? { ar: '' }, instructor, coverImage: details.coverImage, price: pricing.price, promoPrice: pricing.promoPrice ?? pricing.promo, currency: pricing.currency ?? 'EGP', ...(foreign ? { foreignPricing: foreign } : {}), startDate: details.schedule?.startDate ?? '', duration: details.schedule?.duration ?? { ar: '' }, deliveryMethod: details.delivery?.method === 'in_person' ? 'inPerson' : details.delivery?.method ?? '', publishedAt: course.publishedAt?.toISOString?.() ?? course.publishedAt, featured: Boolean(course.featured), accreditationVerified: details.accreditation?.verifiedByAcademy === true, delivery: details.delivery, schedule: details.schedule, accreditation: details.accreditation });
+  const normalized = normalizeLegacyPricing(course.published) as Snapshot;
+  const details = normalized.details; const pricing = details.pricing ?? {}; const instructor = details.instructor ?? {}; const seo = normalized.seo ?? {};
+  return publicValue({ slug: course.slug, title: details.title, shortDescription: details.shortDescription, seoTitle: seo.title ?? details.title, seoDescription: seo.description ?? details.shortDescription, noindex: seo.noindex, ogImage: seo.ogImage, category: { ar: String(details.category ?? '') }, instructorName: instructor.name ?? { ar: '' }, instructor, coverImage: details.coverImage, price: pricing.price, promoPrice: pricing.promoPrice ?? pricing.promo, currency: pricing.currency ?? 'EGP', pricingContactUs: pricing.contactUs === true, startDate: details.schedule?.startDate ?? '', duration: details.schedule?.duration ?? { ar: '' }, deliveryMethod: details.delivery?.method === 'in_person' ? 'inPerson' : details.delivery?.method ?? '', publishedAt: course.publishedAt?.toISOString?.() ?? course.publishedAt, featured: Boolean(course.featured), accreditationVerified: details.accreditation?.verifiedByAcademy === true, delivery: details.delivery, schedule: details.schedule, accreditation: details.accreditation });
 }
 
 export function courseEtag(value: unknown) { return `"${createHash('sha256').update(JSON.stringify(value)).digest('hex')}"`; }

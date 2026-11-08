@@ -179,7 +179,7 @@ describe('BE-CHARTS overview ranges and chart aggregations', () => {
     expect(result.body.paymentStatusDistribution).toEqual(expect.arrayContaining([{ status: 'paid', count: 1 }, { status: 'partially_refunded', count: 1 }, { status: 'refunded', count: 1 }, { status: 'cancelled', count: 1 }]));
     expect(result.body.byCourse).toHaveLength(6);
     expect(result.body.byCourse[5]).toMatchObject({ courseId: 'other', registrations: 2 });
-    expect(result.body.byAudience).toEqual(expect.arrayContaining([expect.objectContaining({ audience: 'egyptian' }), expect.objectContaining({ audience: 'foreign' })]));
+    expect(result.body).not.toHaveProperty('byAudience');
     expect(result.body.revenueSeriesByCurrency).not.toHaveProperty('totalRevenue');
 
     const overview = await request(app).get('/api/v1/admin/overview?from=2026-11-02&to=2026-11-04').set('Cookie', adminCookie).expect(200);

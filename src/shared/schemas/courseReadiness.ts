@@ -48,16 +48,6 @@ export function checkReadiness(snapshot: CourseSnapshot, slug?: string): {
   if (price !== null && promo != null && promo >= price) {
     issue('details', 'details.pricing.promo', 'سعر الخصم لازم يكون أقل من السعر الأساسي.', promo);
   }
-  const foreign = details.foreignPricing as { enabled: boolean; price?: number | null; promoPrice?: number | null; contactUs?: boolean };
-  if (foreign?.enabled) {
-    if (foreign.price == null && foreign.contactUs !== true) {
-      issue('details', 'details.foreignPricing.price', 'السعر بالدولار مطلوب — اكتب السعر أو اختار تواصل لمعرفة السعر.', foreign.price);
-    }
-    if (foreign.price != null && foreign.promoPrice != null && foreign.promoPrice >= foreign.price) {
-      issue('details', 'details.foreignPricing.promoPrice', 'سعر العرض لازم يكون أقل من السعر الأساسي.', foreign.promoPrice);
-    }
-  }
-
   const visible = (page?.sections ?? []).filter((section: Section) => section.visible);
   const filled = visible.filter((section) => !isSectionEmpty(section, { price, promoPrice: promo ?? null, contactUs: details.pricing.contactUs === true, instructor: details.instructor as never }));
   if (!filled.length) {

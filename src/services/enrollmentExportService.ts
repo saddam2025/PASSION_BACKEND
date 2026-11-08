@@ -15,7 +15,7 @@ export const ENROLLMENT_EXPORT_MAX_ROWS = 10_000;
 type ExportQuery = z.infer<typeof enrollmentListQuerySchema>;
 type ExportRow = {
   reference: string; lead: { fullName: string; email: string; phone: string }; courseTitle: string;
-  enrollmentStatus: string; followUpStatus: string; audience: 'egyptian' | 'foreign'; assignedTo: string | null; registeredAt: Date;
+  enrollmentStatus: string; followUpStatus: string; assignedTo: string | null; registeredAt: Date;
   priceSnapshot: { amount: number | null; currency: string };
   paymentSummary: { netMinor: number; status: string; lastPaymentAt: Date | null };
 };
@@ -30,7 +30,6 @@ function pipelineFor(query: ExportQuery, actor: AuthActor): PipelineStage[] {
   if ((query.paymentStatus || query.sort === 'paymentStatus') && !canSeePaymentDetails(actor)) throw new ForbiddenError('فلترة الدفع مش متاحة لحسابك.');
   const match: Record<string, unknown> = {};
   if (query.courseId) match.courseId = new mongoose.Types.ObjectId(query.courseId);
-  if (query.audience) match.audience = query.audience;
   if (query.enrollmentStatus) match.enrollmentStatus = query.enrollmentStatus;
   if (query.followUpStatus) match.followUpStatus = query.followUpStatus;
   if (query.paymentStatus) match['paymentSummary.status'] = query.paymentStatus;
@@ -72,7 +71,7 @@ export async function prepareEnrollmentExport(query: ExportQuery, actor: AuthAct
     { $unwind: { path: '$assignee', preserveNullAndEmptyArrays: true } },
     { $project: {
       reference: 1, lead: { fullName: '$lead.fullName', email: '$lead.email', phone: '$lead.phone' },
-      courseTitle: '$courseSnapshot.title.ar', enrollmentStatus: 1, followUpStatus: 1, audience: { $ifNull: ['$audience', 'egyptian'] },
+      courseTitle: '$courseSnapshot.title.ar', enrollmentStatus: 1, followUpStatus: 1,
       assignedTo: '$assignee.name', registeredAt: 1, priceSnapshot: 1, paymentSummary: 1,
     } },
   ]).cursor({ batchSize: 500 });
@@ -81,7 +80,7 @@ export async function prepareEnrollmentExport(query: ExportQuery, actor: AuthAct
 
 export async function auditEnrollmentExport(query: ExportQuery, rowCount: number, actor: AuthActor, logger: pino.Logger) {
   const filters = {
-    ...(query.courseId ? { courseId: query.courseId } : {}), ...(query.audience ? { audience: query.audience } : {}), ...(query.enrollmentStatus ? { enrollmentStatus: query.enrollmentStatus } : {}),
+    ...(query.courseId ? { courseId: query.courseId } : {}), ...(query.enrollmentStatus ? { enrollmentStatus: query.enrollmentStatus } : {}),
     ...(query.followUpStatus ? { followUpStatus: query.followUpStatus } : {}), ...(query.paymentStatus ? { paymentStatus: query.paymentStatus } : {}),
     ...(query.assignedTo ? { assignedTo: query.assignedTo === 'me' ? 'current-user' : query.assignedTo === 'unassigned' ? 'unassigned' : 'specific-user' } : {}),
     ...(query.dateFrom ? { dateFrom: query.dateFrom } : {}), ...(query.dateTo ? { dateTo: query.dateTo } : {}),

@@ -218,12 +218,17 @@ describe('BE-5C payments, derived summaries and export (Atlas passion_test)', ()
     await post(admin, `/api/v1/payments/${refund.body.payment.id}/void`, { reason: 'إلغاء استرداد بالدولار' }).expect(200);
     await expectSummary(enrollment._id, 'paid');
     expect((await recomputePaymentSummary(enrollment._id)).currency).toBe('USD');
-    const foreignList = await admin.target.get('/api/v1/enrollments?audience=foreign').expect(200);
-    expect(foreignList.body.items[0]).toMatchObject({ id: String(enrollment._id), audience: 'foreign', priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
-    expect((await admin.target.get(`/api/v1/enrollments/${enrollment._id}`).expect(200)).body.enrollment).toMatchObject({ audience: 'foreign', priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
+    const currencyList = await admin.target.get('/api/v1/enrollments').expect(200);
+    const listed = currencyList.body.items.find((item: { id: string }) => item.id === String(enrollment._id));
+    expect(listed).toMatchObject({ id: String(enrollment._id), priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
+    expect(listed).not.toHaveProperty('audience');
+    const detail = (await admin.target.get(`/api/v1/enrollments/${enrollment._id}`).expect(200)).body.enrollment;
+    expect(detail).toMatchObject({ priceSnapshot: { currency: 'USD' }, paymentSummary: { currency: 'USD' } });
+    expect(detail).not.toHaveProperty('audience');
     const csv = await admin.target.get('/api/v1/enrollments/export.csv').expect(200);
-    expect(csv.text).toContain('الجمهور,العملة');
-    expect(csv.text).toContain('foreign,USD');
+    expect(csv.text).toContain('العملة');
+    expect(csv.text).not.toContain('الجمهور');
+    expect(csv.text).toContain('USD');
     expect(csv.text).toContain('100.00');
   });
 
@@ -289,7 +294,7 @@ describe('BE-5C payments, derived summaries and export (Atlas passion_test)', ()
     expect(csv.text.startsWith('\uFEFF')).toBe(true);
     expect(csv.text).toContain('"\'=SUM(1,2)"');
     expect(csv.text).toContain('حالة الدفع');
-    expect(csv.text).toContain('الجمهور,العملة');
+    expect(csv.text).not.toContain('الجمهور');
     expect(csv.text).not.toMatch(/_id|payloadHash|tokenHash|idempotencyKey/);
     expect(csv.text.split('\r\n').filter(Boolean).length - 1).toBe(listed.body.total);
     expect(csv.text).toContain('30.00');

@@ -9,7 +9,6 @@ import { FormDefinitionSchema } from './registrationForm';
 
 const optionalText = BilingualTextSchema.optional();
 const minorUnits = z.number().int().nonnegative().nullable();
-const foreignMinorUnits = z.number().int().positive().max(100_000_000).nullable();
 export function hasInvalidWhatsappTokens(value: string): boolean {
   return /[{}]/.test(value.replace(/\{(?:name|course|reference)\}/g, ''));
 }
@@ -26,28 +25,15 @@ export type CourseImageRef = z.infer<typeof CourseImageRefSchema>;
 
 export const CoursePricingSchema = z
   .object({
-    price: minorUnits,
+    price: minorUnits.nullable(),
     promo: minorUnits.optional(),
     promoPrice: minorUnits.optional(),
-    currency: z.literal('EGP').default('EGP'),
+    currency: z.enum(['EGP', 'USD']).default('EGP'),
     contactUs: z.boolean().optional(),
     paymentInstructions: BilingualRichTextSchema.optional(),
   })
   .strict();
 export type CoursePricing = z.infer<typeof CoursePricingSchema>;
-
-export const ForeignCoursePricingSchema = z.object({
-  enabled: z.boolean().default(false),
-  price: foreignMinorUnits.default(null),
-  promoPrice: foreignMinorUnits.default(null),
-  currency: z.literal('USD').default('USD'),
-  contactUs: z.boolean().optional(),
-}).strict().superRefine((pricing, ctx) => {
-  if (pricing.enabled && pricing.price !== undefined && pricing.price !== null && pricing.promoPrice != null && pricing.promoPrice >= pricing.price) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['promoPrice'], message: 'سعر العرض لازم يكون أقل من السعر الأساسي.' });
-  }
-}).transform((pricing) => pricing.enabled ? pricing : { enabled: false });
-export type ForeignCoursePricing = z.infer<typeof ForeignCoursePricingSchema>;
 
 export const CourseInstructorSchema = z
   .object({
@@ -139,7 +125,6 @@ export const CourseDetailsSchema = z
     delivery: CourseDeliverySchema,
     schedule: CourseScheduleSchema,
     pricing: CoursePricingSchema,
-    foreignPricing: ForeignCoursePricingSchema.default({ enabled: false, price: null, promoPrice: null, currency: 'USD' }),
     enrollment: CourseEnrollmentSchema,
     accreditation: CourseAccreditationSchema,
     whatsappOverrides: CourseWhatsappOverridesSchema.optional(),

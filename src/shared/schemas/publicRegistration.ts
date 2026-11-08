@@ -16,7 +16,6 @@ const attributionSchema = z.object({
 
 export const publicRegistrationBodySchema = z.object({
   courseSlug: z.string().trim().min(1).max(160),
-  audience: z.string().trim().max(20).optional(),
   fullName: z.string().max(400).optional(),
   email: z.string().max(400).optional(),
   phone: z.string().max(100).optional(),

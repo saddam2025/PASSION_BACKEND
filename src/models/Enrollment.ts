@@ -11,7 +11,8 @@ const schema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
   courseSnapshot: { title: { type: bilingualTextSchema, required: true }, slug: { type: String, required: true } },
   priceSnapshot: { amount: { type: Number, min: 0, default: null }, currency: { type: String, required: true, uppercase: true, enum: ['EGP', 'USD', 'EUR', 'GBP', 'SAR', 'AED', 'KWD', 'QAR', 'BHD', 'OMR', 'JOD'] } },
-  audience: { type: String, enum: ['egyptian', 'foreign'], default: 'egyptian', required: true },
+  // Legacy audience values remain readable in MongoDB, but new registrations no longer classify people by audience.
+  audience: { type: String, enum: ['egyptian', 'foreign'], required: false },
   consent: { acceptedAt: { type: Date, required: true }, policyVersion: { type: Number, required: true, min: 0 } },
   formSnapshot: { fields: { type: [formFieldSnapshotSchema], default: [] } },
   answers: { type: Map, of: Schema.Types.Mixed, default: {} },

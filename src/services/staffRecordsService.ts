@@ -59,7 +59,6 @@ export const staffRecordsService = {
     if ((query.paymentStatus || query.sort === 'paymentStatus') && !canSeePayments) throw new ForbiddenError('عرض حالة الدفع مش متاح لحسابك.');
     const match: Record<string, unknown> = {};
     if (query.courseId) match.courseId = new mongoose.Types.ObjectId(query.courseId);
-    if (query.audience) match.audience = query.audience;
     if (query.enrollmentStatus) match.enrollmentStatus = query.enrollmentStatus;
     if (query.followUpStatus) match.followUpStatus = query.followUpStatus;
     if (query.paymentStatus) match['paymentSummary.status'] = query.paymentStatus;
@@ -106,7 +105,7 @@ export const staffRecordsService = {
             _id: 1, reference: 1,
             lead: { fullName: '$lead.fullName', email: '$lead.email', phone: '$lead.phone' },
             courseTitle: '$courseSnapshot.title', priceSnapshot: 1,
-            audience: { $ifNull: ['$audience', 'egyptian'] }, enrollmentStatus: 1, followUpStatus: 1,
+            enrollmentStatus: 1, followUpStatus: 1,
             paymentSummary: 1,
             assignedTo: { _id: '$assignee._id', name: '$assignee.name' }, registeredAt: 1,
           } },
@@ -123,7 +122,6 @@ export const staffRecordsService = {
         lead: item.lead,
         courseTitle: arabicName(item.courseTitle),
         priceSnapshot: item.priceSnapshot,
-        audience: item.audience ?? 'egyptian',
         enrollmentStatus: item.enrollmentStatus,
         followUpStatus: item.followUpStatus,
         ...(canSeePayments ? { paymentSummary: { ...(item.paymentSummary as Record<string, unknown> | undefined ?? { netMinor: 0, status: 'unpaid', lastPaymentAt: null }), currency: (item.priceSnapshot as { currency?: string } | undefined)?.currency ?? 'EGP' } } : {}),
@@ -163,7 +161,6 @@ export const staffRecordsService = {
       lead: { id: id(lead._id), fullName: lead.fullName, email: lead.email, phone: lead.phone, phoneNormalized: lead.phoneNormalized },
       courseSnapshot: { title: arabicName(enrollment.courseSnapshot?.title), slug: enrollment.courseSnapshot?.slug },
       priceSnapshot: enrollment.priceSnapshot,
-      audience: enrollment.audience ?? 'egyptian',
       ...(actor && roleHasPermission(actor, 'viewPayments') ? { paymentSummary: { ...(enrollment.paymentSummary ?? { netMinor: 0, status: 'unpaid', lastPaymentAt: null }), currency: enrollment.priceSnapshot?.currency ?? 'EGP' } } : {}),
       formSnapshot: enrollment.formSnapshot,
       answers: enrollment.answers instanceof Map ? Object.fromEntries(enrollment.answers) : enrollment.answers,

@@ -82,7 +82,7 @@ export const overviewChartsService = {
 
     const trunc = (field: string) => ({ $dateTrunc: { date: field, unit: granularity, timezone: ACADEMY_TIME_ZONE, ...(granularity === 'week' ? { startOfWeek: 'saturday' } : {}) } });
     const bucketString = (field: string) => ({ $dateToString: { format: '%Y-%m-%d', date: trunc(field), timezone: ACADEMY_TIME_ZONE } });
-    const [registrationRows, revenueRows, funnelRows, distributionRows, courseRows, audienceRows, audiencePresence, enrollmentCurrencies] = await Promise.all([
+    const [registrationRows, revenueRows, funnelRows, distributionRows, courseRows, enrollmentCurrencies] = await Promise.all([
       buckets.length ? Enrollment.aggregate<{ _id: string; registrations: number; paid: number }>([
         { $match: cohortMatch },
         { $group: { _id: bucketString('$registeredAt'), registrations: { $sum: 1 }, paid: { $sum: { $cond: [{ $eq: ['$paymentSummary.status', 'paid'] }, 1, 0] } } } },
@@ -116,14 +116,6 @@ export const overviewChartsService = {
           rest: [{ $sort: { registrations: -1, _id: 1 } }, { $skip: 5 }, { $group: { _id: null, registrations: { $sum: '$registrations' }, paid: { $sum: '$paid' } } }, { $project: { _id: 0, registrations: 1, paid: 1 } }],
         } },
       ]),
-      Enrollment.aggregate<{ _id: string; registrations: number; paid: number }>([
-        { $match: { ...cohortMatch, audience: { $in: ['egyptian', 'foreign'] } } },
-        { $group: { _id: '$audience', registrations: { $sum: 1 }, paid: { $sum: { $cond: [{ $eq: ['$paymentSummary.status', 'paid'] }, 1, 0] } } } },
-        { $sort: { _id: 1 } },
-      ]),
-      Enrollment.aggregate<{ _id: string; count: number }>([
-        { $match: cohortMatch }, { $group: { _id: { $type: '$audience' }, count: { $sum: 1 } } },
-      ]),
       Enrollment.aggregate<{ _id: string }>([
         { $match: cohortMatch }, { $group: { _id: '$priceSnapshot.currency' } }, { $sort: { _id: 1 } },
       ]),
@@ -156,7 +148,6 @@ export const overviewChartsService = {
       paymentStatusDistribution: distributionRows.filter((row) => ['unpaid', 'partially_paid', 'paid', 'refunded', 'partially_refunded', 'cancelled'].includes(row._id)).map((row) => ({ status: row._id, count: row.count })),
       byCourse,
     };
-    if (audiencePresence.some((row) => row._id !== 'missing' && row.count > 0)) result.byAudience = audienceRows.map((row) => ({ audience: row._id, registrations: row.registrations, paid: row.paid }));
     return result;
   },
 };
