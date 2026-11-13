@@ -195,9 +195,11 @@ export const staffRecordsService = {
 
   async updateFollowUp(idValue: string, actor: AuthActor, input: { followUpStatus: EnrollmentDocument['followUpStatus']; note?: string }, logger: pino.Logger) {
     const enrollment = await findEnrollment(idValue);
-    ensureNotCancelled(enrollment);
     const before = statusValue(enrollment.followUpStatus);
-    if (before === input.followUpStatus) throw new ConflictError('المتابعة بالحالة دي بالفعل.');
+    // Treat repeating the current status as a successful no-op. This keeps retries
+    // and clients that resend the selected value idempotent without creating a
+    // duplicate history entry or audit event.
+    if (before === input.followUpStatus) return this.getEnrollment(idValue, actor);
     enrollment.followUpStatus = input.followUpStatus;
     enrollment.history.push({ at: new Date(), by: new mongoose.Types.ObjectId(actor.id), from: before, to: input.followUpStatus, ...(input.note ? { note: plainText(input.note).slice(0, 1_000) } : {}) });
     await enrollment.save();

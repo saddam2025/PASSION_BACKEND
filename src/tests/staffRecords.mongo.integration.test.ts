@@ -144,11 +144,34 @@ describe('BE-5B staff records (MongoDB integration)', () => {
     await write(admin, 'post', `/api/v1/enrollments/${enrollment._id}/assign`, { assigneeId: String(assistantUser._id) }).expect(200);
     await write(admin, 'post', `/api/v1/enrollments/${enrollment._id}/assign`, { assigneeId: String(inactive._id) }).expect(422);
     await write(admin, 'post', `/api/v1/enrollments/${enrollment._id}/assign`, { assigneeId: '000000000000000000000000' }).expect(422);
-    await write(admin, 'patch', `/api/v1/enrollments/${enrollment._id}/follow-up`, { followUpStatus: 'new' }).expect(409);
+    const historyCountBeforeRepeat = (await Enrollment.findById(enrollment._id).select('history').lean())!.history.length;
+    const auditCountBeforeRepeat = await AuditLog.countDocuments({ entityId: enrollment._id });
+    const repeatedFollowUp = await write(admin, 'patch', `/api/v1/enrollments/${enrollment._id}/follow-up`, { followUpStatus: 'new' }).expect(200);
+    expect(repeatedFollowUp.body.enrollment.followUpStatus).toBe('new');
+    expect(repeatedFollowUp.body.enrollment.history).toHaveLength(historyCountBeforeRepeat);
+    expect(await AuditLog.countDocuments({ entityId: enrollment._id })).toBe(auditCountBeforeRepeat);
     const logged = await write(admin, 'post', `/api/v1/enrollments/${enrollment._id}/whatsapp-contact`).expect(200);
     expect(logged.body.enrollment.followUpStatus).toBe('new');
     expect(logged.body.enrollment.history.at(-1).note).toContain('من غير تأكيد إرسال رسالة');
     expect(await AuditLog.countDocuments({ entityId: enrollment._id })).toBe(2);
+  });
+
+  it('keeps follow-up independent from cancellation and records each real change once', async () => {
+    const enrollment = await createEnrollment(8, { status: 'cancelled', follow: 'interested' });
+    const admin = await login(client(), 'be5b-admin@example.test', adminPassword);
+
+    const updated = await write(admin, 'patch', `/api/v1/enrollments/${enrollment._id}/follow-up`, {
+      followUpStatus: 'closed', note: 'تم إنهاء المتابعة',
+    }).expect(200);
+    expect(updated.body.enrollment).toMatchObject({ enrollmentStatus: 'cancelled', followUpStatus: 'closed', isActive: false });
+    expect(updated.body.enrollment.history.at(-1)).toMatchObject({ from: 'interested', to: 'closed', note: 'تم إنهاء المتابعة' });
+
+    const historyCount = updated.body.enrollment.history.length;
+    await write(admin, 'patch', `/api/v1/enrollments/${enrollment._id}/follow-up`, { followUpStatus: 'closed' }).expect(200);
+    const stored = await Enrollment.findById(enrollment._id).lean();
+    expect(stored).toMatchObject({ enrollmentStatus: 'cancelled', followUpStatus: 'closed', isActive: false });
+    expect(stored?.history).toHaveLength(historyCount);
+    expect(await AuditLog.countDocuments({ entityId: enrollment._id, action: 'enrollment.follow_up_changed' })).toBe(1);
   });
 
   it('requires confirmation reason, cancellation reason and deactivates cancelled enrollment for a new registration', async () => {
